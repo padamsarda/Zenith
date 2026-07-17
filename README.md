@@ -4,42 +4,35 @@ Zenith is a long-term software project providing a runtime platform for building
 operating an assistant called **Zeni**. Zeni runs on top of the Zenith runtime.
 
 This repository is under incremental, long-term development. The current milestone
-(Milestone 1: Runtime Foundation) establishes the core lifecycle, configuration, and
-logging infrastructure. No assistant behavior, plugins, or integrations have been
-implemented yet.
+(Milestone 2: core infrastructure and event system) adds an `ApplicationContext`,
+a `ServiceRegistry`, and a synchronous in-process `EventBus` that the runtime uses
+to announce its own lifecycle. No assistant behavior, plugins, or integrations have
+been implemented yet.
 
 ## Project structure
 
-```
-main.py                    Entry point. Creates and runs the Runtime.
-runtime/
-    __init__.py             Runtime package marker.
-    runtime.py               Runtime class: owns startup, shutdown, and the idle loop.
-    state.py                 RuntimeState enum describing lifecycle states.
-    exceptions.py             Zenith exception hierarchy (ZenithError and subclasses).
-    logging_setup.py          Console logging configuration.
-configs/
-    __init__.py              Configuration package marker.
-    config.py                 Immutable Config dataclass and TOML loader.
-    config.toml (optional)    User-provided configuration; not required.
-architecture/               Architecture documentation and design records.
-docs/                       General project documentation.
-plugins/                    Reserved for future plugin code. Currently empty.
-tests/                      Automated tests (pytest).
-```
+See [`docs/folder_structure.md`](docs/folder_structure.md) for the full, up-to-date
+directory listing. Summary:
 
-### Purpose of each directory
-
-- **runtime/** — the core of the application. Owns the lifecycle (startup, running,
-  shutdown), logging, and the runtime state machine. This is the only package that
-  `main.py` depends on directly.
+- **runtime/** — the core of the application: lifecycle (`runtime.py`), shared
+  resources (`context.py`), state (`state.py`), errors (`exceptions.py`), logging
+  (`logging_setup.py`), the service registry (`registry.py`), validation
+  (`validation.py`), the event system (`events/`), and small helpers (`utils/`).
+  This is the only package `main.py` depends on directly.
 - **configs/** — centralized configuration loading. Provides an immutable `Config`
   object built from defaults, optionally overridden by `configs/config.toml`.
 - **architecture/** — design records and architectural notes, kept separate from code.
-- **docs/** — general-purpose documentation that isn't architecture-specific.
+- **docs/** — technical documentation: architecture, the event system, the service
+  registry, folder responsibilities, and development conventions.
 - **plugins/** — reserved location for future plugin code. Not yet implemented.
-- **tests/** — pytest test suite covering configuration, runtime state transitions,
-  runtime lifecycle, and the exception hierarchy.
+- **tests/** — pytest test suite, one file per source module.
+
+## Further reading
+
+- [`docs/architecture.md`](docs/architecture.md) — runtime lifecycle and module map.
+- [`docs/events.md`](docs/events.md) — the event system.
+- [`docs/service_registry.md`](docs/service_registry.md) — the service registry.
+- [`docs/conventions.md`](docs/conventions.md) — development conventions.
 
 ## Requirements
 

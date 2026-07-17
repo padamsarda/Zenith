@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from runtime.exceptions import ConfigurationError
+from runtime.utils.fs_utils import file_exists
 
 DEFAULT_CONFIG_PATH = Path("configs/config.toml")
 
@@ -39,7 +40,7 @@ def load_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Config:
     Raises:
         ConfigurationError: If the file exists but cannot be parsed.
     """
-    if not config_path.is_file():
+    if not file_exists(config_path):
         return Config()
 
     try:
