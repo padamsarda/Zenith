@@ -9,6 +9,7 @@ from datetime import datetime
 from configs.config import Config
 from runtime.commands.executor import CommandExecutor
 from runtime.events.bus import EventBus
+from runtime.plugins.registry import PluginRegistry
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState
 from runtime.utils.time_utils import utc_now
@@ -34,3 +35,4 @@ class ApplicationContext:
     services: ServiceRegistry = field(default_factory=ServiceRegistry)
     events: EventBus = field(default_factory=EventBus)
     commands: CommandExecutor = field(default_factory=CommandExecutor)
+    plugins: PluginRegistry = field(default_factory=PluginRegistry)

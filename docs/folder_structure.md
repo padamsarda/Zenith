@@ -27,6 +27,15 @@ runtime/
         context.py                    CommandContext, CancellationToken.
         events.py                      Concrete command lifecycle events.
         executor.py                     CommandExecutor.
+    plugins/
+        __init__.py
+        state.py                   PluginState enum, TERMINAL_STATES.
+        manifest.py                  PluginManifest.
+        validation.py                  Plugin validation guard functions.
+        plugin.py                        Plugin (abstract base class).
+        context.py                        PluginContext.
+        events.py                          Concrete plugin lifecycle events.
+        registry.py                          PluginRegistry.
     utils/
         __init__.py
         time_utils.py              utc_now().
@@ -41,7 +50,10 @@ configs/
 
 architecture/                  Architecture documentation and design records.
 docs/                          Technical documentation (this folder).
-plugins/                       Reserved for future plugin code. Currently empty.
+plugins/                       Reserved for future plugin code on disk (loaded by
+                                a future discovery/loading step). Currently empty —
+                                not to be confused with runtime/plugins/, which is
+                                the plugin framework itself.
 tests/                         pytest test suite, one file per module under test.
 ```
 
@@ -57,7 +69,9 @@ tests/                         pytest test suite, one file per module under test
   separate from code and from the technical reference docs in `docs/`.
 - **docs/** — technical reference documentation: how the system is built,
   not why decisions were made (that belongs in `architecture/`).
-- **plugins/** — reserved location for future plugin code. Not
-  implemented in this milestone.
+- **plugins/** — reserved location for future plugin code loaded from
+  disk. Filesystem discovery and dynamic loading are not implemented in
+  any milestone so far; see `docs/plugins.md` for the framework
+  (`runtime/plugins/`) that a future loader will use.
 - **tests/** — pytest suite. One test file per source module
   (`test_<module>.py`), mirroring the `runtime/`/`configs/` layout.

@@ -1,8 +1,8 @@
 # Runtime Architecture
 
 This document describes the internal structure of the Zenith runtime as of
-Milestone 4 (command execution framework). It covers what owns what, and
-how control flows through startup and shutdown.
+Milestone 5 (plugin framework). It covers what owns what, and how control
+flows through startup and shutdown.
 
 ## Overview
 
@@ -30,6 +30,7 @@ shared resource a subsystem might need:
 - `services` — a `ServiceRegistry` (see `service_registry.md`)
 - `events` — an `EventBus` (see `events.md`)
 - `commands` — a `CommandExecutor` (see `commands.md`)
+- `plugins` — a `PluginRegistry` (see `plugins.md`)
 
 `Runtime` owns exactly one `ApplicationContext` instance
 (`Runtime.context`), created in `__init__`. Nothing in the codebase uses
@@ -85,6 +86,7 @@ everything else (`Config`, `Event`) is immutable.
 | `runtime/validation.py` | Guard functions used at system boundaries. |
 | `runtime/events/` | `Event`, `EventBus`, `EventLogger`, and concrete lifecycle events. |
 | `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
+| `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, and concrete plugin events. See `plugins.md`. |
 | `runtime/utils/` | Small, reusable helpers (time, UUID, filesystem, text). |
 | `configs/config.py` | `Config` dataclass and TOML loader. |
 
@@ -97,14 +99,22 @@ utils, exceptions, state
   -> validation, configs.config
     -> registry, events (event -> lifecycle_events, bus, event_logger)
       -> commands (status -> validation -> command -> context, events -> executor)
+      -> plugins (state -> validation -> manifest, plugin -> context, events -> registry)
         -> context
           -> runtime
 ```
 
-`runtime/commands/context.py` and `runtime/commands/executor.py` refer
-to `ApplicationContext` only in `TYPE_CHECKING` blocks — `runtime.context`
-imports `runtime.commands.executor` at runtime (for the `commands`
-field), so a real import in the other direction would be circular.
+`runtime/commands/context.py`, `runtime/commands/executor.py`,
+`runtime/plugins/context.py`, `runtime/plugins/plugin.py`, and
+`runtime/plugins/registry.py` all refer to `ApplicationContext` only in
+`TYPE_CHECKING` blocks — `runtime.context` imports
+`runtime.commands.executor` and `runtime.plugins.registry` at runtime
+(for the `commands` and `plugins` fields), so a real import in the
+other direction would be circular. `runtime/plugins/context.py` and
+`runtime/plugins/plugin.py` similarly refer to
+`runtime.plugins.registry.PluginRegistry` only under `TYPE_CHECKING`,
+since `registry.py` imports `context.py` for real (to construct
+`PluginContext`).
 
 No module imports anything "above" it in this chain, so there are no
 circular imports. `runtime/__init__.py` and `configs/__init__.py`

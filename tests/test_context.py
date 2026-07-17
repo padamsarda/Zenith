@@ -10,6 +10,7 @@ from runtime.commands.executor import CommandExecutor
 from runtime.context import ApplicationContext
 from runtime.events.bus import EventBus
 from runtime.events.event import Event
+from runtime.plugins.registry import PluginRegistry
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState
 
@@ -65,6 +66,19 @@ def test_two_contexts_have_independent_command_executors() -> None:
     second = make_context()
 
     assert first.commands is not second.commands
+
+
+def test_context_owns_a_plugin_registry() -> None:
+    context = make_context()
+
+    assert isinstance(context.plugins, PluginRegistry)
+
+
+def test_two_contexts_have_independent_plugin_registries() -> None:
+    first = make_context()
+    second = make_context()
+
+    assert first.plugins is not second.plugins
 
 
 def test_two_contexts_have_independent_registries() -> None:

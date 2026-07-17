@@ -69,3 +69,32 @@ class CommandExecutionError(CommandError):
 
 class CommandCancelledError(CommandError):
     """Raised by a command action to signal cooperative cancellation."""
+
+
+class PluginError(ZenithError):
+    """Base class for all plugin framework errors."""
+
+
+class PluginRegistrationError(PluginError):
+    """Raised when registering a plugin ID that is already registered."""
+
+
+class PluginNotFoundError(PluginError):
+    """Raised when looking up, unregistering, enabling, or disabling a
+    plugin ID that isn't registered.
+    """
+
+
+class PluginValidationError(PluginError):
+    """Raised when a Plugin fails validation.
+
+    Covers structural issues (manifest fields, version format) and
+    invalid `PluginState` transitions.
+    """
+
+
+class PluginLifecycleError(PluginError):
+    """Raised when a Plugin's `initialize`, `shutdown`, `register`, or
+    `unregister` hook raises during `PluginRegistry.register` or
+    `PluginRegistry.unregister`. Wraps the original exception.
+    """
