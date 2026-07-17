@@ -44,3 +44,28 @@ class EventBusError(ZenithError):
     """Raised for invalid EventBus operations, such as unsubscribing a
     listener that was never subscribed to the given event type.
     """
+
+
+class CommandError(ZenithError):
+    """Base class for all command execution framework errors."""
+
+
+class CommandValidationError(CommandError):
+    """Raised when a Command fails validation.
+
+    Covers structural issues (name, metadata), duplicate execution of an
+    already-executed command ID, and invalid `CommandStatus` transitions.
+    """
+
+
+class CommandExecutionError(CommandError):
+    """Raised by a command action to report a structured execution failure.
+
+    The `CommandExecutor` treats this the same as any other exception
+    raised from an action: it is caught, logged, and turned into a
+    failed `CommandResult` rather than propagating.
+    """
+
+
+class CommandCancelledError(CommandError):
+    """Raised by a command action to signal cooperative cancellation."""

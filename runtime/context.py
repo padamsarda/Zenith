@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from configs.config import Config
+from runtime.commands.executor import CommandExecutor
 from runtime.events.bus import EventBus
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState
@@ -32,3 +33,4 @@ class ApplicationContext:
     state: RuntimeState = RuntimeState.INITIALIZING
     services: ServiceRegistry = field(default_factory=ServiceRegistry)
     events: EventBus = field(default_factory=EventBus)
+    commands: CommandExecutor = field(default_factory=CommandExecutor)

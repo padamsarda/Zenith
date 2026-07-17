@@ -1,8 +1,8 @@
 # Runtime Architecture
 
 This document describes the internal structure of the Zenith runtime as of
-Milestone 2 (core infrastructure and event system). It covers what owns
-what, and how control flows through startup and shutdown.
+Milestone 4 (command execution framework). It covers what owns what, and
+how control flows through startup and shutdown.
 
 ## Overview
 
@@ -29,6 +29,7 @@ shared resource a subsystem might need:
 - `state` — the current `RuntimeState`
 - `services` — a `ServiceRegistry` (see `service_registry.md`)
 - `events` — an `EventBus` (see `events.md`)
+- `commands` — a `CommandExecutor` (see `commands.md`)
 
 `Runtime` owns exactly one `ApplicationContext` instance
 (`Runtime.context`), created in `__init__`. Nothing in the codebase uses
@@ -83,7 +84,8 @@ everything else (`Config`, `Event`) is immutable.
 | `runtime/registry.py` | `ServiceRegistry`. |
 | `runtime/validation.py` | Guard functions used at system boundaries. |
 | `runtime/events/` | `Event`, `EventBus`, `EventLogger`, and concrete lifecycle events. |
-| `runtime/utils/` | Small, reusable helpers (time, UUID, filesystem). |
+| `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
+| `runtime/utils/` | Small, reusable helpers (time, UUID, filesystem, text). |
 | `configs/config.py` | `Config` dataclass and TOML loader. |
 
 ## Import direction
@@ -94,9 +96,15 @@ Dependencies flow one way, from leaves to `Runtime`:
 utils, exceptions, state
   -> validation, configs.config
     -> registry, events (event -> lifecycle_events, bus, event_logger)
-      -> context
-        -> runtime
+      -> commands (status -> validation -> command -> context, events -> executor)
+        -> context
+          -> runtime
 ```
+
+`runtime/commands/context.py` and `runtime/commands/executor.py` refer
+to `ApplicationContext` only in `TYPE_CHECKING` blocks — `runtime.context`
+imports `runtime.commands.executor` at runtime (for the `commands`
+field), so a real import in the other direction would be circular.
 
 No module imports anything "above" it in this chain, so there are no
 circular imports. `runtime/__init__.py` and `configs/__init__.py`

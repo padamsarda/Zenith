@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["main"]
-packages = ["runtime", "configs"]
+packages = ["runtime", "runtime.events", "runtime.commands", "runtime.utils", "configs"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

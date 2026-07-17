@@ -13,6 +13,7 @@ from pathlib import Path
 from configs.config import Config
 from runtime.exceptions import ValidationError
 from runtime.utils.fs_utils import directory_exists
+from runtime.utils.text_utils import is_blank_or_padded
 
 
 def validate_path_exists(path: Path, *, must_be_dir: bool = False) -> None:
@@ -37,7 +38,7 @@ def validate_service_name(name: str) -> None:
     A valid service name is a non-empty string with no leading or
     trailing whitespace.
     """
-    if not isinstance(name, str) or not name.strip() or name != name.strip():
+    if is_blank_or_padded(name):
         raise ValidationError(f"Invalid service name: {name!r}")
 
 

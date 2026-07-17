@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from runtime.exceptions import (
+    CommandCancelledError,
+    CommandError,
+    CommandExecutionError,
+    CommandValidationError,
     ConfigurationError,
     EventBusError,
     ServiceAlreadyRegisteredError,
@@ -51,6 +55,22 @@ def test_event_bus_error_inherits_zenith_error() -> None:
     assert issubclass(EventBusError, ZenithError)
 
 
+def test_command_error_inherits_zenith_error() -> None:
+    assert issubclass(CommandError, ZenithError)
+
+
+def test_command_validation_error_inherits_command_error() -> None:
+    assert issubclass(CommandValidationError, CommandError)
+
+
+def test_command_execution_error_inherits_command_error() -> None:
+    assert issubclass(CommandExecutionError, CommandError)
+
+
+def test_command_cancelled_error_inherits_command_error() -> None:
+    assert issubclass(CommandCancelledError, CommandError)
+
+
 def test_all_zenith_errors_are_catchable_as_zenith_error() -> None:
     for error_type in (
         ConfigurationError,
@@ -60,8 +80,20 @@ def test_all_zenith_errors_are_catchable_as_zenith_error() -> None:
         ServiceNotFoundError,
         ServiceAlreadyRegisteredError,
         EventBusError,
+        CommandError,
+        CommandValidationError,
+        CommandExecutionError,
+        CommandCancelledError,
     ):
         try:
             raise error_type("boom")
         except ZenithError as exc:
+            assert isinstance(exc, error_type)
+
+
+def test_all_command_errors_are_catchable_as_command_error() -> None:
+    for error_type in (CommandValidationError, CommandExecutionError, CommandCancelledError):
+        try:
+            raise error_type("boom")
+        except CommandError as exc:
             assert isinstance(exc, error_type)

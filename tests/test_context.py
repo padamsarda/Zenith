@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from configs.config import Config
+from runtime.commands.executor import CommandExecutor
 from runtime.context import ApplicationContext
 from runtime.events.bus import EventBus
 from runtime.events.event import Event
@@ -51,6 +52,19 @@ def test_context_owns_an_event_bus() -> None:
     context = make_context()
 
     assert isinstance(context.events, EventBus)
+
+
+def test_context_owns_a_command_executor() -> None:
+    context = make_context()
+
+    assert isinstance(context.commands, CommandExecutor)
+
+
+def test_two_contexts_have_independent_command_executors() -> None:
+    first = make_context()
+    second = make_context()
+
+    assert first.commands is not second.commands
 
 
 def test_two_contexts_have_independent_registries() -> None:

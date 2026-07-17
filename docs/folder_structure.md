@@ -18,11 +18,21 @@ runtime/
         lifecycle_events.py        Concrete runtime lifecycle events.
         bus.py                     EventBus.
         event_logger.py            EventLogger.
+    commands/
+        __init__.py
+        status.py                  CommandStatus enum, TERMINAL_STATUSES.
+        validation.py               Command validation guard functions.
+        command.py                  Command.
+        result.py                    CommandResult.
+        context.py                    CommandContext, CancellationToken.
+        events.py                      Concrete command lifecycle events.
+        executor.py                     CommandExecutor.
     utils/
         __init__.py
         time_utils.py              utc_now().
         uuid_utils.py               generate_id().
         fs_utils.py                  directory_exists(), file_exists().
+        text_utils.py                is_blank_or_padded().
 
 configs/
     __init__.py
