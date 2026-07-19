@@ -1,4 +1,4 @@
-"""Tests for runtime.utils helpers."""
+"""Tests for shared.utils helpers."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from uuid import UUID
 
 import pytest
 
-from runtime.utils.fs_utils import directory_exists, file_exists
-from runtime.utils.text_utils import is_blank_or_padded
-from runtime.utils.time_utils import utc_now
-from runtime.utils.uuid_utils import generate_id
+from shared.utils.fs_utils import directory_exists, file_exists
+from shared.utils.text_utils import is_blank_or_padded
+from shared.utils.time_utils import utc_now
+from shared.utils.uuid_utils import generate_id
 
 
 def test_utc_now_returns_timezone_aware_datetime() -> None:

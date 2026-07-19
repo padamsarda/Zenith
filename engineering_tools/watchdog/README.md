@@ -8,11 +8,17 @@ It runs Claude Code inside a subprocess, captures output in real time, parses th
 
 ```
 Zenith/
-└── watchdog/
-    ├── README.md         # This documentation
-    ├── __init__.py       # Package marker
-    └── watchdog.py       # Main watchdog script
+└── engineering_tools/
+    └── watchdog/
+        ├── README.md         # This documentation
+        ├── __init__.py       # Package marker
+        └── watchdog.py       # Main watchdog script
 ```
+
+This tool lives under `engineering_tools/` because it is a standalone
+developer utility, not part of the Zenith assistant runtime (`runtime/`).
+It has no dependency on `runtime/`, `shared/`, or `configs/`, so it can be
+lifted out independently in the future.
 
 ## How It Works
 
@@ -45,7 +51,7 @@ Zenith/
 To start the watchdog with the default `claude` command, run:
 
 ```bash
-python watchdog/watchdog.py
+python engineering_tools/watchdog/watchdog.py
 ```
 
 ### Running with a Custom Command
@@ -54,10 +60,10 @@ If your Claude Code CLI has a different name, or you need to run it via `npx`, o
 
 ```bash
 # Example with npx
-python watchdog/watchdog.py npx @anthropic-ai/claude
+python engineering_tools/watchdog/watchdog.py npx @anthropic-ai/claude
 
 # Example with a mock python command
-python watchdog/watchdog.py python tests/mock_claude.py
+python engineering_tools/watchdog/watchdog.py python tests/mock_claude.py
 ```
 
 ## Developer Notes

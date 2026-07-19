@@ -27,6 +27,8 @@ packages = [
     "shared",
     "shared.utils",
     "configs",
+    "engineering_tools",
+    "engineering_tools.watchdog",
 ]
 
 [tool.pytest.ini_options]

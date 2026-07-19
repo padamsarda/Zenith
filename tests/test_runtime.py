@@ -15,9 +15,9 @@ from runtime.events.lifecycle_events import (
     ApplicationStopping,
     ConfigurationLoaded,
 )
-from runtime.exceptions import ZenithRuntimeError
 from runtime.runtime import Runtime
 from runtime.state import RuntimeState
+from shared.exceptions import ZenithRuntimeError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

@@ -80,28 +80,34 @@ everything else (`Config`, `Event`) is immutable.
 | `runtime/runtime.py` | Owns the lifecycle; the only module `main.py` depends on. |
 | `runtime/context.py` | `ApplicationContext` dataclass. |
 | `runtime/state.py` | `RuntimeState` enum. |
-| `runtime/exceptions.py` | Exception hierarchy shared by every module. |
+| `runtime/exceptions.py` | Exception hierarchy for the runtime's own subsystems (service registry, event bus, commands, plugins). Rooted at `shared.exceptions.ZenithError`. |
 | `runtime/logging_setup.py` | Console logging configuration. |
 | `runtime/registry.py` | `ServiceRegistry`. |
 | `runtime/validation.py` | Guard functions used at system boundaries. |
 | `runtime/events/` | `Event`, `EventBus`, `EventLogger`, and concrete lifecycle events. |
 | `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
 | `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, and concrete plugin events. See `plugins.md`. |
-| `runtime/utils/` | Small, reusable helpers (time, UUID, filesystem, text). |
+| `shared/exceptions.py` | Generic exception hierarchy (`ZenithError` and a handful of domain-agnostic subclasses) with no dependency on a specific runtime subsystem. |
+| `shared/utils/` | Small, reusable helpers (time, UUID, filesystem, text) with no dependency on `runtime/`. |
 | `configs/config.py` | `Config` dataclass and TOML loader. |
+
+`shared/` is kept free of anything specific to the Zenith assistant
+runtime so it can eventually be depended on by more than one
+application in this repository — see `docs/folder_structure.md`.
 
 ## Import direction
 
 Dependencies flow one way, from leaves to `Runtime`:
 
 ```
-utils, exceptions, state
-  -> validation, configs.config
-    -> registry, events (event -> lifecycle_events, bus, event_logger)
-      -> commands (status -> validation -> command -> context, events -> executor)
-      -> plugins (state -> validation -> manifest, plugin -> context, events -> registry)
-        -> context
-          -> runtime
+shared.exceptions, shared.utils
+  -> runtime.exceptions, state
+    -> validation, configs.config
+      -> registry, events (event -> lifecycle_events, bus, event_logger)
+        -> commands (status -> validation -> command -> context, events -> executor)
+        -> plugins (state -> validation -> manifest, plugin -> context, events -> registry)
+          -> context
+            -> runtime
 ```
 
 `runtime/commands/context.py`, `runtime/commands/executor.py`,

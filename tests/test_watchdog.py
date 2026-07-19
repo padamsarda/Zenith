@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import zoneinfo
 import pytest
 
-from watchdog import watchdog
+from engineering_tools.watchdog import watchdog
 
 
 def test_parse_reset_time_basic_am() -> None:
@@ -125,9 +125,9 @@ def test_main_loop_flow() -> None:
     mock_parse = mock.Mock()
     mock_parse.return_value = future_reset
 
-    with mock.patch("watchdog.watchdog.run_and_stream", mock_run), \
-         mock.patch("watchdog.watchdog.parse_reset_time", mock_parse), \
-         mock.patch("watchdog.watchdog.log_msg") as mock_log:
+    with mock.patch("engineering_tools.watchdog.watchdog.run_and_stream", mock_run), \
+         mock.patch("engineering_tools.watchdog.watchdog.parse_reset_time", mock_parse), \
+         mock.patch("engineering_tools.watchdog.watchdog.log_msg") as mock_log:
          
         exit_code = watchdog.main_loop(["claude"])
         

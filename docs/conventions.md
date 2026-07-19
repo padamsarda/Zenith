@@ -28,8 +28,12 @@ new code in `runtime/` or `configs/`.
 ## Errors
 
 - Every raised error is a subclass of `ZenithError`
-  (`runtime/exceptions.py`). Don't raise bare `ValueError`, `KeyError`,
+  (`shared/exceptions.py`). Don't raise bare `ValueError`, `KeyError`,
   etc. from public APIs.
+- Exceptions specific to a runtime subsystem (service registry, event
+  bus, commands, plugins) live in `runtime/exceptions.py`, not
+  `shared/exceptions.py` — `shared/` is reserved for exceptions with no
+  dependency on the assistant runtime's own abstractions.
 - Validation functions (`runtime/validation.py`) raise `ValidationError`
   rather than returning `False` — a successful call means the value has
   already been checked, so callers don't need to re-check it.

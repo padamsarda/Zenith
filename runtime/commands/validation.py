@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from runtime.commands.status import CommandStatus
-from shared.exceptions import CommandValidationError
+from runtime.exceptions import CommandValidationError
 from shared.utils.text_utils import is_blank_or_padded
 
 if TYPE_CHECKING:

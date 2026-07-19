@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from configs.config import Config, load_config
-from runtime.exceptions import ConfigurationError
+from shared.exceptions import ConfigurationError
 
 
 def test_load_config_missing_file_returns_defaults(tmp_path: Path) -> None:

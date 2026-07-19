@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from runtime.exceptions import ServiceAlreadyRegisteredError, ServiceNotFoundError, ValidationError
+from runtime.exceptions import ServiceAlreadyRegisteredError, ServiceNotFoundError
 from runtime.registry import ServiceRegistry
+from shared.exceptions import ValidationError
 
 
 def test_register_and_get_returns_same_instance() -> None:

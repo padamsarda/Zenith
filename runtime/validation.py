@@ -11,9 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from configs.config import Config
-from runtime.exceptions import ValidationError
-from runtime.utils.fs_utils import directory_exists
-from runtime.utils.text_utils import is_blank_or_padded
+from shared.exceptions import ValidationError
+from shared.utils.fs_utils import directory_exists
+from shared.utils.text_utils import is_blank_or_padded
 
 
 def validate_path_exists(path: Path, *, must_be_dir: bool = False) -> None:

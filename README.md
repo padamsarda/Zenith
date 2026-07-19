@@ -14,13 +14,21 @@ been implemented yet.
 See [`docs/folder_structure.md`](docs/folder_structure.md) for the full, up-to-date
 directory listing. Summary:
 
-- **runtime/** — the core of the application: lifecycle (`runtime.py`), shared
-  resources (`context.py`), state (`state.py`), errors (`exceptions.py`), logging
-  (`logging_setup.py`), the service registry (`registry.py`), validation
-  (`validation.py`), the event system (`events/`), and small helpers (`utils/`).
+- **runtime/** — the assistant runtime: lifecycle (`runtime.py`), shared
+  resources (`context.py`), state (`state.py`), runtime-subsystem errors
+  (`exceptions.py`), logging (`logging_setup.py`), the service registry
+  (`registry.py`), validation (`validation.py`), the event system (`events/`),
+  the command framework (`commands/`), and the plugin framework (`plugins/`).
   This is the only package `main.py` depends on directly.
 - **configs/** — centralized configuration loading. Provides an immutable `Config`
   object built from defaults, optionally overridden by `configs/config.toml`.
+- **shared/** — generic, domain-agnostic code with no dependency on `runtime/`:
+  a base exception hierarchy (`exceptions.py`) and small helpers (`utils/`) for
+  time, UUIDs, the filesystem, and text. Kept reusable outside the assistant
+  runtime by design.
+- **engineering_tools/** — standalone developer utilities that are not part of
+  the assistant runtime (e.g. `watchdog/`, which auto-resumes Claude Code after
+  a session limit). Each tool is self-contained.
 - **architecture/** — design records and architectural notes, kept separate from code.
 - **docs/** — technical documentation: architecture, the event system, the service
   registry, folder responsibilities, and development conventions.

@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from configs.config import Config
-from runtime.exceptions import ValidationError
 from runtime.validation import validate_config, validate_path_exists, validate_service_name
+from shared.exceptions import ValidationError
 
 
 def test_validate_path_exists_passes_for_existing_file(tmp_path: Path) -> None:

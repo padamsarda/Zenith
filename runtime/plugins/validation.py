@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from shared.exceptions import PluginValidationError
+from runtime.exceptions import PluginValidationError
 from runtime.plugins.state import PluginState
 from shared.utils.text_utils import is_blank_or_padded
 
