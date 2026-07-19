@@ -8,7 +8,7 @@ import pytest
 
 from configs.config import Config
 from runtime.context import ApplicationContext
-from runtime.events.event import Event
+from shared.events.event import Event
 from runtime.exceptions import (
     PluginLifecycleError,
     PluginNotFoundError,

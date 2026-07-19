@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from runtime.events.event import Event
+from shared.events.event import Event
 
 DEFAULT_LOGGER_NAME = "zenith.events"
 

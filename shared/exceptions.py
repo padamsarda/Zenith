@@ -28,3 +28,13 @@ class ZenithRuntimeError(ZenithError):
 
 class ValidationError(ZenithError):
     """Raised when a value fails a validation check."""
+
+
+class EventBusError(ZenithError):
+    """Raised for invalid EventBus operations, such as unsubscribing a
+    listener that was never subscribed to the given event type.
+
+    Lives here rather than in `runtime.exceptions` because the event
+    system itself (`shared.events`) is generic infrastructure shared by
+    every application in this repository.
+    """

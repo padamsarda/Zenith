@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from shared.exceptions import (
     ConfigurationError,
+    EventBusError,
     ValidationError,
     ZenithError,
     ZenithRuntimeError,
@@ -31,8 +32,12 @@ def test_validation_error_inherits_zenith_error() -> None:
     assert issubclass(ValidationError, ZenithError)
 
 
+def test_event_bus_error_inherits_zenith_error() -> None:
+    assert issubclass(EventBusError, ZenithError)
+
+
 def test_all_shared_errors_are_catchable_as_zenith_error() -> None:
-    for error_type in (ConfigurationError, ZenithRuntimeError, ValidationError):
+    for error_type in (ConfigurationError, ZenithRuntimeError, ValidationError, EventBusError):
         try:
             raise error_type("boom")
         except ZenithError as exc:

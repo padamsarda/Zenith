@@ -6,8 +6,8 @@ import logging
 
 import pytest
 
-from runtime.events.event import Event
-from runtime.events.event_logger import EventLogger
+from shared.events.event import Event
+from shared.events.event_logger import EventLogger
 
 
 def test_log_writes_info_record(caplog: pytest.LogCaptureFixture) -> None:

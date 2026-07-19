@@ -7,7 +7,6 @@ from runtime.exceptions import (
     CommandError,
     CommandExecutionError,
     CommandValidationError,
-    EventBusError,
     PluginError,
     PluginLifecycleError,
     PluginNotFoundError,
@@ -30,10 +29,6 @@ def test_service_not_found_error_inherits_service_registry_error() -> None:
 
 def test_service_already_registered_error_inherits_service_registry_error() -> None:
     assert issubclass(ServiceAlreadyRegisteredError, ServiceRegistryError)
-
-
-def test_event_bus_error_inherits_zenith_error() -> None:
-    assert issubclass(EventBusError, ZenithError)
 
 
 def test_command_error_inherits_zenith_error() -> None:
@@ -77,7 +72,6 @@ def test_all_runtime_errors_are_catchable_as_zenith_error() -> None:
         ServiceRegistryError,
         ServiceNotFoundError,
         ServiceAlreadyRegisteredError,
-        EventBusError,
         CommandError,
         CommandValidationError,
         CommandExecutionError,

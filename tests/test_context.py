@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from configs.config import Config
 from runtime.commands.executor import CommandExecutor
 from runtime.context import ApplicationContext
-from runtime.events.bus import EventBus
-from runtime.events.event import Event
+from shared.events.bus import EventBus
+from shared.events.event import Event
 from runtime.plugins.registry import PluginRegistry
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState

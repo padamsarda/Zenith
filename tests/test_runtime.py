@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from runtime.events.event import Event
+from shared.events.event import Event
 from runtime.events.lifecycle_events import (
     ApplicationStarted,
     ApplicationStarting,

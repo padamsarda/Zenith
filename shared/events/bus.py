@@ -15,9 +15,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from runtime.events.event import Event
-from runtime.events.event_logger import EventLogger
-from runtime.exceptions import EventBusError
+from shared.events.event import Event
+from shared.events.event_logger import EventLogger
+from shared.exceptions import EventBusError
 
 Listener = Callable[[Event], None]
 

@@ -6,9 +6,9 @@ import logging
 
 import pytest
 
-from runtime.events.bus import EventBus
-from runtime.events.event import Event
-from runtime.exceptions import EventBusError
+from shared.events.bus import EventBus
+from shared.events.event import Event
+from shared.exceptions import EventBusError
 
 
 class SampleEvent(Event):

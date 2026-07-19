@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from runtime.events.event import Event
+from shared.events.event import Event
 from runtime.plugins.events import (
     PluginDisabled,
     PluginEnabled,

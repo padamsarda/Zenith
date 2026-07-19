@@ -20,7 +20,7 @@ from runtime.commands.executor import CommandExecutor
 from runtime.commands.result import CommandResult
 from runtime.commands.status import CommandStatus
 from runtime.context import ApplicationContext
-from runtime.events.event import Event
+from shared.events.event import Event
 from runtime.exceptions import CommandCancelledError, CommandExecutionError, CommandValidationError
 
 
@@ -462,7 +462,7 @@ def test_execute_cancelled_event_carries_reason() -> None:
 
 def test_execute_events_are_logged(caplog: pytest.LogCaptureFixture) -> None:
     # ApplicationContext's EventBus defaults to the "zenith.events" logger
-    # (see runtime.events.bus.DEFAULT_LOGGER_NAME); EventLogger writes one
+    # (see shared.events.bus.DEFAULT_LOGGER_NAME); EventLogger writes one
     # INFO line per emitted event automatically.
     app_context = make_application_context()
     executor = CommandExecutor()

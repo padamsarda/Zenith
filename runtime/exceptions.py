@@ -1,11 +1,12 @@
 """Exception hierarchy for the Zenith assistant runtime's subsystems.
 
-Covers the service registry, event bus, command execution framework,
-and plugin framework. These are specific to how this runtime models
-services, events, commands, and plugins, so they live here rather than
-in `shared.exceptions` — a future platform built on `shared` would not
+Covers the service registry, command execution framework, and plugin
+framework. These are specific to how this runtime models services,
+commands, and plugins, so they live here rather than in
+`shared.exceptions` — a future platform built on `shared` would not
 necessarily share these same abstractions. Every class here still
-roots at `shared.exceptions.ZenithError`.
+roots at `shared.exceptions.ZenithError`. (`EventBusError` lives in
+`shared.exceptions`, alongside the event system in `shared.events`.)
 """
 
 from __future__ import annotations
@@ -23,12 +24,6 @@ class ServiceNotFoundError(ServiceRegistryError):
 
 class ServiceAlreadyRegisteredError(ServiceRegistryError):
     """Raised when registering a service name that is already in use."""
-
-
-class EventBusError(ZenithError):
-    """Raised for invalid EventBus operations, such as unsubscribing a
-    listener that was never subscribed to the given event type.
-    """
 
 
 class CommandError(ZenithError):

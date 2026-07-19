@@ -11,7 +11,7 @@ from runtime.commands.events import (
     CommandFailed,
     CommandStarted,
 )
-from runtime.events.event import Event
+from shared.events.event import Event
 
 ALL_COMMAND_EVENT_TYPES = (
     CommandCreated,

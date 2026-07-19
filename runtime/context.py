@@ -8,7 +8,7 @@ from datetime import datetime
 
 from configs.config import Config
 from runtime.commands.executor import CommandExecutor
-from runtime.events.bus import EventBus
+from shared.events.bus import EventBus
 from runtime.plugins.registry import PluginRegistry
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from runtime.events.event import Event
+from shared.events.event import Event
 
 
 @dataclass(frozen=True)

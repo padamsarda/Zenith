@@ -1,11 +1,15 @@
 # Event System
 
-An in-process, synchronous publish/subscribe system used to decouple the
-runtime's lifecycle from anything that wants to react to it.
+An in-process, synchronous publish/subscribe system used to decouple
+"something happened" from "something reacts to it." It lives in
+`shared/events/` because it is generic infrastructure: the Zenith
+runtime uses it for its lifecycle, command, and plugin events, and the
+Engineering Manager uses it for its domain events. Each application
+defines its own concrete event types on top of the shared base.
 
 ## Event
 
-`runtime.events.event.Event` is the base class for every event. It is a
+`shared.events.event.Event` is the base class for every event. It is a
 frozen (immutable) dataclass with these fields:
 
 | Field | Type | Description |
@@ -39,7 +43,7 @@ Defined in `runtime.events.lifecycle_events`:
 
 ## EventBus
 
-`runtime.events.bus.EventBus` dispatches events to listeners subscribed to
+`shared.events.bus.EventBus` dispatches events to listeners subscribed to
 their exact type.
 
 ```python
@@ -64,12 +68,12 @@ bus.clear()
 - **Synchronous only.** No asyncio, threads, or queues — `emit` calls
   every listener on the calling thread before returning.
 
-`unsubscribe` raises `EventBusError` if the listener was never subscribed
-to that event type.
+`unsubscribe` raises `EventBusError` (`shared.exceptions`) if the
+listener was never subscribed to that event type.
 
 ## EventLogger
 
-`runtime.events.event_logger.EventLogger` writes one INFO-level log line
+`shared.events.event_logger.EventLogger` writes one INFO-level log line
 per event, containing its timestamp, name, and source. `EventBus` owns an
 `EventLogger` internally and calls it at the start of every `emit`, so
 every event that passes through the bus is logged automatically — no
