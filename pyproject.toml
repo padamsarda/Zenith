@@ -24,7 +24,8 @@ packages = [
     "runtime.events",
     "runtime.commands",
     "runtime.plugins",
-    "runtime.utils",
+    "shared",
+    "shared.utils",
     "configs",
 ]
 

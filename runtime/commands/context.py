@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from runtime.utils.time_utils import utc_now
+from shared.utils.time_utils import utc_now
 
 if TYPE_CHECKING:
     from runtime.context import ApplicationContext

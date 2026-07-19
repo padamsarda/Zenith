@@ -9,8 +9,8 @@ from uuid import UUID
 
 from runtime.commands.status import CommandStatus
 from runtime.commands.validation import validate_status_transition
-from runtime.utils.time_utils import utc_now
-from runtime.utils.uuid_utils import generate_id
+from shared.utils.time_utils import utc_now
+from shared.utils.uuid_utils import generate_id
 
 
 @dataclass(frozen=True)

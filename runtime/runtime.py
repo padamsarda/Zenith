@@ -17,10 +17,10 @@ from runtime.events.lifecycle_events import (
     ConfigurationLoaded,
     ConfigurationLoadFailed,
 )
-from runtime.exceptions import ConfigurationError, ZenithRuntimeError
+from shared.exceptions import ConfigurationError, ZenithRuntimeError
 from runtime.logging_setup import configure_logging
 from runtime.state import RuntimeState
-from runtime.utils.fs_utils import directory_exists
+from shared.utils.fs_utils import directory_exists
 from runtime.validation import validate_config, validate_path_exists
 
 BANNER = r"""

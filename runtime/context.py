@@ -12,7 +12,7 @@ from runtime.events.bus import EventBus
 from runtime.plugins.registry import PluginRegistry
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState
-from runtime.utils.time_utils import utc_now
+from shared.utils.time_utils import utc_now
 
 APPLICATION_VERSION = "0.1.0"
 
