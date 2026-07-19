@@ -10,6 +10,9 @@ authors = [{ name = "padamsarda" }]
 [project.urls]
 Homepage = "https://github.com/padamsarda/zenith"
 
+[project.scripts]
+zenith-em = "engineering_manager.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 

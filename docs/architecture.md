@@ -1,8 +1,9 @@
 # Runtime Architecture
 
-This document describes the internal structure of the Zenith runtime as of
-Milestone 5 (plugin framework). It covers what owns what, and how control
-flows through startup and shutdown.
+This document describes the internal structure of the Zenith runtime —
+one of the two applications in this repository (see ADR 0002; the other
+is documented in `engineering_manager.md`). It covers what owns what,
+and how control flows through startup and shutdown.
 
 ## Overview
 
@@ -84,16 +85,19 @@ everything else (`Config`, `Event`) is immutable.
 | `runtime/logging_setup.py` | Console logging configuration. |
 | `runtime/registry.py` | `ServiceRegistry`. |
 | `runtime/validation.py` | Guard functions used at system boundaries. |
-| `runtime/events/` | `Event`, `EventBus`, `EventLogger`, and concrete lifecycle events. |
+| `runtime/events/` | Concrete runtime lifecycle events. The event system itself (`Event`, `EventBus`, `EventLogger`) lives in `shared/events/` — see `events.md`. |
 | `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
 | `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, and concrete plugin events. See `plugins.md`. |
-| `shared/exceptions.py` | Generic exception hierarchy (`ZenithError` and a handful of domain-agnostic subclasses) with no dependency on a specific runtime subsystem. |
+| `shared/exceptions.py` | Generic exception hierarchy (`ZenithError` and a handful of domain-agnostic subclasses, including `EventBusError`) with no dependency on a specific runtime subsystem. |
+| `shared/events/` | The event system: `Event`, `EventBus`, `EventLogger`. |
 | `shared/utils/` | Small, reusable helpers (time, UUID, filesystem, text) with no dependency on `runtime/`. |
 | `configs/config.py` | `Config` dataclass and TOML loader. |
 
 `shared/` is kept free of anything specific to the Zenith assistant
-runtime so it can eventually be depended on by more than one
-application in this repository — see `docs/folder_structure.md`.
+runtime and is depended on by both applications in this repository —
+the runtime and the Engineering Manager (`engineering_manager/`, see
+`engineering_manager.md`). Neither application imports the other; see
+ADR 0002.
 
 ## Import direction
 
@@ -101,13 +105,14 @@ Dependencies flow one way, from leaves to `Runtime`:
 
 ```
 shared.exceptions, shared.utils
-  -> runtime.exceptions, state
-    -> validation, configs.config
-      -> registry, events (event -> lifecycle_events, bus, event_logger)
-        -> commands (status -> validation -> command -> context, events -> executor)
-        -> plugins (state -> validation -> manifest, plugin -> context, events -> registry)
-          -> context
-            -> runtime
+  -> shared.events (event -> event_logger -> bus)
+    -> runtime.exceptions, state
+      -> validation, configs.config
+        -> registry, runtime.events.lifecycle_events
+          -> commands (status -> validation -> command -> context, events -> executor)
+          -> plugins (state -> validation -> manifest, plugin -> context, events -> registry)
+            -> context
+              -> runtime
 ```
 
 `runtime/commands/context.py`, `runtime/commands/executor.py`,

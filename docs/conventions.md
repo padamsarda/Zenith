@@ -1,7 +1,7 @@
 # Development Conventions
 
-Conventions observed throughout the Zenith codebase. Follow these for any
-new code in `runtime/` or `configs/`.
+Conventions observed throughout this codebase. Follow these for any new
+code in `runtime/`, `configs/`, `shared/`, or `engineering_manager/`.
 
 ## Language and style
 
@@ -10,7 +10,11 @@ new code in `runtime/` or `configs/`.
 - PEP 8 naming and layout.
 - `pathlib.Path`, not `os.path`, for filesystem paths.
 - No external dependencies beyond the standard library, except `pytest`
-  as a dev-only dependency for testing.
+  as a dev-only dependency for testing. (`sqlite3`, `json`, `argparse`,
+  etc. are standard library and fine.)
+- Import boundaries (ADR 0002): `engineering_manager/` never imports
+  `runtime/` or `configs/`; `runtime/` never imports
+  `engineering_manager/`; `shared/` imports neither.
 
 ## Structure
 
@@ -59,7 +63,9 @@ new code in `runtime/` or `configs/`.
 ## Testing
 
 - `pytest`, one test file per source module: `runtime/foo.py` ->
-  `tests/test_foo.py`.
+  `tests/test_foo.py`. Engineering Manager modules use a `test_em_`
+  prefix (`engineering_manager/store/store.py` -> `tests/test_em_store.py`)
+  so names never collide in the flat `tests/` directory.
 - Test names read as a sentence describing the behavior under test:
   `test_<subject>_<expected_behavior>`.
 - Use `tmp_path` for anything touching the filesystem; never write to the
@@ -67,6 +73,15 @@ new code in `runtime/` or `configs/`.
 - Each test creates its own `Runtime` / `ApplicationContext` / `EventBus`
   / `ServiceRegistry` instance — no shared mutable fixtures, so tests
   can't leak state into one another.
+
+## Architecture decisions
+
+- Any change that would make a future reader ask "why is it like this?"
+  — a new subsystem, a layer boundary, a storage choice, a protocol
+  contract, a dependency-policy change — gets an ADR in
+  `architecture/`, following `architecture/README.md`.
+- Never contradict an accepted ADR silently; supersede it with a new
+  one.
 
 ## Commits
 

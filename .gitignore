@@ -25,6 +25,12 @@ htmlcov/
 # Logs
 *.log
 
+# Local databases (Engineering Manager state lives outside the repo by
+# default, but never commit one that ends up inside it)
+*.db
+*.db-wal
+*.db-shm
+
 # Editors
 .vscode/
 .idea/

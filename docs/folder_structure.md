@@ -1,107 +1,111 @@
 # Folder Structure
 
 ```
-main.py                        Entry point. Creates and runs the Runtime.
+main.py                        Entry point for the Zenith runtime.
 
-runtime/
+runtime/                       The Zenith assistant runtime.
     __init__.py                 Package marker only (no imports — see architecture.md).
     runtime.py                  Runtime: owns startup, shutdown, and the idle loop.
     context.py                  ApplicationContext: holds shared runtime resources.
     state.py                    RuntimeState enum.
-    exceptions.py                 Exception hierarchy for the runtime's own
-                                   subsystems (registry, events, commands, plugins).
-    logging_setup.py             Console logging configuration.
-    registry.py                  ServiceRegistry.
-    validation.py                 Validation guard functions.
+    exceptions.py               Exceptions for the runtime's own subsystems
+                                 (registry, commands, plugins).
+    logging_setup.py            Console logging configuration.
+    registry.py                 ServiceRegistry.
+    validation.py               Validation guard functions.
     events/
-        __init__.py
-        event.py                  Event base class.
-        lifecycle_events.py        Concrete runtime lifecycle events.
-        bus.py                     EventBus.
-        event_logger.py            EventLogger.
+        lifecycle_events.py      Concrete runtime lifecycle events. (The event
+                                  system itself lives in shared/events/.)
     commands/
-        __init__.py
-        status.py                  CommandStatus enum, TERMINAL_STATUSES.
-        validation.py               Command validation guard functions.
-        command.py                  Command.
-        result.py                    CommandResult.
-        context.py                    CommandContext, CancellationToken.
-        events.py                      Concrete command lifecycle events.
-        executor.py                     CommandExecutor.
+        status.py                CommandStatus enum, TERMINAL_STATUSES.
+        validation.py            Command validation guard functions.
+        command.py               Command.
+        result.py                CommandResult.
+        context.py               CommandContext, CancellationToken.
+        events.py                Concrete command lifecycle events.
+        executor.py              CommandExecutor.
     plugins/
-        __init__.py
-        state.py                   PluginState enum, TERMINAL_STATES.
-        manifest.py                  PluginManifest.
-        validation.py                  Plugin validation guard functions.
-        plugin.py                        Plugin (abstract base class).
-        context.py                        PluginContext.
-        events.py                          Concrete plugin lifecycle events.
-        registry.py                          PluginRegistry.
+        state.py                 PluginState enum, TERMINAL_STATES.
+        manifest.py              PluginManifest.
+        validation.py            Plugin validation guard functions.
+        plugin.py                Plugin (abstract base class).
+        context.py               PluginContext.
+        events.py                Concrete plugin lifecycle events.
+        registry.py              PluginRegistry.
 
-configs/
-    __init__.py
-    config.py                    Config dataclass and TOML loader.
-    config.toml (optional)       User-provided configuration; not required.
+engineering_manager/           The Engineering Manager application.
+    __init__.py                 Package docstring only.
+    __main__.py                 `python -m engineering_manager` entry point.
+    cli.py                      Command-line interface over the facade.
+    manager.py                  EngineeringManager facade.
+    events.py                   Concrete Engineering Manager events.
+    exceptions.py               EM exception hierarchy (rooted at ZenithError).
+    domain/
+        states.py                ProjectStatus, TaskStatus, SessionStatus + terminals.
+        validation.py            Structural and transition guard functions.
+        project.py               Project.
+        task.py                  Task.
+        session.py               Session.
+        account.py               ProviderAccount.
+    providers/
+        base.py                  Provider ABC, SessionSpec, SessionHandle,
+                                  ProviderSessionState, ProviderSessionStatus.
+        registry.py              ProviderRegistry.
+        in_memory.py             InMemoryProvider (reference implementation).
+    store/
+        database.py              SQLite connection + user_version migrations.
+        serialization.py         Entity <-> row conversion, EventLogEntry.
+        store.py                 Store: strict CRUD + append-only event log.
+    orchestration/
+        policy.py                AssignmentPolicy ABC, FirstAvailablePolicy.
+        dispatcher.py            Dispatcher: eligibility, dispatch, session lifecycle.
 
-shared/                         Generic code with no dependency on runtime/,
-                                 kept reusable by anything built in this
-                                 repository in the future.
-    __init__.py
-    exceptions.py                 ZenithError and other domain-agnostic
-                                   exceptions. Runtime-subsystem-specific
-                                   exceptions live in runtime/exceptions.py
-                                   instead.
+configs/                       Configuration loading for the Zenith runtime.
+    config.py                   Config dataclass and TOML loader.
+    config.toml (optional)      User-provided configuration; not required.
+
+shared/                        Infrastructure both applications depend on.
+                                Imports neither runtime/ nor engineering_manager/.
+    exceptions.py               ZenithError and domain-agnostic exceptions
+                                 (incl. EventBusError).
+    events/
+        event.py                 Event base class.
+        bus.py                   EventBus.
+        event_logger.py          EventLogger.
     utils/
-        __init__.py
-        time_utils.py              utc_now().
-        uuid_utils.py               generate_id().
-        fs_utils.py                  directory_exists(), file_exists().
-        text_utils.py                is_blank_or_padded().
+        time_utils.py            utc_now().
+        uuid_utils.py            generate_id().
+        fs_utils.py              directory_exists(), file_exists().
+        text_utils.py            is_blank_or_padded().
 
-engineering_tools/              Standalone developer utilities that are not
-                                 part of the Zenith assistant runtime. Each
-                                 tool is self-contained (no dependency on
-                                 runtime/, shared/, or configs/) so it can be
-                                 lifted out independently in the future.
-    __init__.py
-    watchdog/                     Auto-resumes Claude Code after a session
-                                   limit. See watchdog/README.md.
+engineering_tools/             Standalone developer utilities, self-contained
+                                (no dependency on any other package here).
+    watchdog/                   Auto-resumes Claude Code after a session limit.
 
-architecture/                  Architecture documentation and design records.
-docs/                          Technical documentation (this folder).
-plugins/                       Reserved for future plugin code on disk (loaded by
-                                a future discovery/loading step). Currently empty —
-                                not to be confused with runtime/plugins/, which is
-                                the plugin framework itself.
-tests/                         pytest test suite, one file per module under test.
+architecture/                  Architecture Decision Records. See its README.
+docs/                          Technical reference documentation (this folder).
+plugins/                       Reserved for future Zenith plugin code on disk.
+tests/                         pytest suite, one file per module under test
+                                (Engineering Manager tests use a test_em_ prefix).
 ```
 
 ## Purpose of each top-level directory
 
-- **runtime/** — the assistant runtime itself: lifecycle, state, events,
-  commands, plugins, configuration validation, and the exceptions
-  specific to those subsystems. This is the only package `main.py`
-  depends on directly.
-- **configs/** — configuration loading, kept separate from `runtime/` so
-  that "what the config looks like" and "how the app runs" are distinct
-  concerns.
-- **shared/** — generic, domain-agnostic code (exceptions, filesystem/
-  time/text/UUID helpers) with no dependency on `runtime/`. Anything
-  placed here should be reusable outside the assistant runtime, not just
-  convenient to import from it — see the "Import direction" note in
-  `docs/architecture.md`.
-- **engineering_tools/** — standalone developer utilities (e.g.
-  `watchdog/`) that are not part of the assistant runtime. Each tool is
-  self-contained so it can be moved to its own repository later without
-  entangling it with `runtime/`.
-- **architecture/** — design records and architectural notes, kept
-  separate from code and from the technical reference docs in `docs/`.
-- **docs/** — technical reference documentation: how the system is built,
-  not why decisions were made (that belongs in `architecture/`).
-- **plugins/** — reserved location for future plugin code loaded from
-  disk. Filesystem discovery and dynamic loading are not implemented in
-  any milestone so far; see `docs/plugins.md` for the framework
-  (`runtime/plugins/`) that a future loader will use.
-- **tests/** — pytest suite. One test file per source module
-  (`test_<module>.py`), mirroring the `runtime/`/`shared/`/`configs/`/
-  `engineering_tools/` layout.
+- **runtime/** — the Zenith assistant runtime. Never imports
+  `engineering_manager/`.
+- **engineering_manager/** — the Engineering Manager. Never imports
+  `runtime/` or `configs/`. See `docs/engineering_manager.md`.
+- **shared/** — code generic enough for both applications. Anything
+  placed here must be reusable by both, not just convenient — see
+  ADR 0002 and ADR 0003.
+- **configs/** — the Zenith runtime's configuration loading, kept
+  separate so "what the config looks like" and "how the app runs" stay
+  distinct concerns.
+- **engineering_tools/** — standalone developer utilities that can be
+  lifted out independently.
+- **architecture/** — ADRs: why the system is the way it is.
+- **docs/** — reference docs: how the system is built.
+- **plugins/** — reserved location for Zenith plugin code loaded from
+  disk by a future loader (`docs/plugins.md`); not to be confused with
+  `runtime/plugins/`, the framework itself.
+- **tests/** — one flat pytest suite covering every package above.
