@@ -28,6 +28,11 @@ packages = [
     "shared.events",
     "shared.utils",
     "configs",
+    "engineering_manager",
+    "engineering_manager.domain",
+    "engineering_manager.orchestration",
+    "engineering_manager.providers",
+    "engineering_manager.store",
     "engineering_tools",
     "engineering_tools.watchdog",
 ]
