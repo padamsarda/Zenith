@@ -11,6 +11,7 @@ from runtime.assistant.permissions import (
     AllowAllPolicy,
     PermissionDecision,
     PermissionPolicy,
+    ToolAllowlistPolicy,
 )
 from runtime.assistant.request import AssistantRequest
 from runtime.capabilities.tool import Tool
@@ -74,3 +75,35 @@ def test_custom_policy_can_deny() -> None:
 
     assert decision.allowed is False
     assert decision.reason == "clocks are off limits"
+
+
+# --- ToolAllowlistPolicy -----------------------------------------------------
+
+
+def test_allowlist_policy_allows_a_listed_tool() -> None:
+    request = AssistantRequest(conversation_id=generate_id(), text="time?")
+    policy = ToolAllowlistPolicy(["clock"])
+
+    decision = policy.evaluate(request, ToolCall(tool_id="clock"), ClockTool())
+
+    assert decision.allowed is True
+    assert decision.reason is None
+
+
+def test_allowlist_policy_denies_an_unlisted_tool() -> None:
+    request = AssistantRequest(conversation_id=generate_id(), text="time?")
+    policy = ToolAllowlistPolicy(["shell"])
+
+    decision = policy.evaluate(request, ToolCall(tool_id="clock"), ClockTool())
+
+    assert decision.allowed is False
+    assert "clock" in decision.reason
+
+
+def test_allowlist_policy_denies_everything_when_empty() -> None:
+    request = AssistantRequest(conversation_id=generate_id(), text="time?")
+    policy = ToolAllowlistPolicy([])
+
+    decision = policy.evaluate(request, ToolCall(tool_id="clock"), ClockTool())
+
+    assert decision.allowed is False

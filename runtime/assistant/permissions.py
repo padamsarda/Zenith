@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -56,3 +57,35 @@ class AllowAllPolicy(PermissionPolicy):
         self, request: AssistantRequest, call: ToolCall, tool: Tool
     ) -> PermissionDecision:
         return PermissionDecision(allowed=True)
+
+
+class ToolAllowlistPolicy(PermissionPolicy):
+    """Permits only tool calls whose `tool_id` is on an explicit allowlist.
+
+    The seam the roadmap anticipated: `AllowAllPolicy` is honest only
+    while every registered tool is harmless. The moment a tool can
+    genuinely act on the world — write a file, run a shell command,
+    commit to a repository (`runtime.tools`, ADR 0016) — an integrator
+    should replace the default with this policy (or a stricter one),
+    naming exactly which tools a given deployment permits. A `tool_id`
+    absent from the allowlist is denied, not merely unpermitted by
+    omission.
+    """
+
+    def __init__(self, allowed_tool_ids: Iterable[str]) -> None:
+        """Create a policy permitting only `allowed_tool_ids`.
+
+        Args:
+            allowed_tool_ids: The `tool_id`s this policy allows. A call
+                for any other tool_id is denied.
+        """
+        self._allowed_tool_ids = frozenset(allowed_tool_ids)
+
+    def evaluate(
+        self, request: AssistantRequest, call: ToolCall, tool: Tool
+    ) -> PermissionDecision:
+        if call.tool_id in self._allowed_tool_ids:
+            return PermissionDecision(allowed=True)
+        return PermissionDecision(
+            allowed=False, reason=f"Tool '{call.tool_id}' is not on the allowlist."
+        )

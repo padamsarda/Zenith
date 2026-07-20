@@ -40,3 +40,6 @@ longer applies or accidentally reversing one that still does.
 - [0011 — A turn-oriented assistant provider contract, separate from the Engineering Manager's](0011-turn-oriented-assistant-provider-contract.md)
 - [0012 — The assistant pipeline: one path from request to reply](0012-assistant-pipeline-one-path-from-request-to-reply.md)
 - [0013 — Capabilities: tools act, skills instruct](0013-tools-act-skills-instruct.md)
+- [0014 — Claude Code CLI as the Engineering Manager's first real Provider](0014-claude-code-cli-as-first-em-provider.md)
+- [0015 — A stdlib-only Claude Messages API client as Zenith's first real AssistantProvider](0015-stdlib-claude-messages-client-as-first-assistant-provider.md)
+- [0016 — Filesystem, Shell, Git, Diff, and Test Runner: the first production tool suite](0016-filesystem-shell-git-diff-test-runner-tool-suite.md)

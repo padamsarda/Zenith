@@ -188,6 +188,25 @@ def test_task_depend_links_existing_tasks(
     assert "depends on" in capsys.readouterr().out
 
 
+def test_run_registers_claude_code_provider_and_ticks_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    run(tmp_path, "project", "add", "zenith", "Zenith")
+    capsys.readouterr()
+
+    exit_code = run(
+        tmp_path,
+        "run",
+        "--max-ticks",
+        "1",
+        "--claude-command",
+        "non_existent_executable_12345",
+    )
+
+    assert exit_code == 0
+    assert "Running the execution engine" in capsys.readouterr().out
+
+
 def test_task_depend_reports_cycle_as_error(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

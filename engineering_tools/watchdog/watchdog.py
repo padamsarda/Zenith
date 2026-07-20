@@ -21,6 +21,13 @@ import zoneinfo
 _TEST_SLEEP_ACCUMULATOR: list[float] = []
 _MOCK_TIME_NOW: datetime | None = None
 
+# The line Claude Code prints when a session hits its usage limit, e.g.
+# "You've hit your session limit · resets 1:40am (Asia/Calcutta)". Shared
+# with anything else that needs to recognize the same condition (see
+# engineering_manager/providers/claude_code.py, which reuses this marker
+# and `parse_reset_time` rather than re-deriving them).
+SESSION_LIMIT_MARKER = "You've hit your session limit"
+
 
 def log_msg(msg: str) -> None:
     """Print message with local timestamp [HH:MM]."""
@@ -175,10 +182,10 @@ def run_and_stream(cmd_args: list[str], is_retry: bool = False) -> tuple[int, st
                 lines = output_buffer.split("\n")
                 output_buffer = lines[-1]  # Keep trailing partial line
                 for completed_line in lines[:-1]:
-                    if "You've hit your session limit" in completed_line:
+                    if SESSION_LIMIT_MARKER in completed_line:
                         session_limit_line = completed_line
             else:
-                if "You've hit your session limit" in output_buffer:
+                if SESSION_LIMIT_MARKER in output_buffer:
                     session_limit_line = output_buffer
 
             # Also log resumption if we see output progress and are clearly past any immediate startup limit exit

@@ -60,6 +60,7 @@ def test_provider_session_status_defaults() -> None:
 
     assert status.detail is None
     assert status.resume_at is None
+    assert status.usage is None
 
 
 def test_provider_session_state_members() -> None:

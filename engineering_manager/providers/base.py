@@ -85,11 +85,19 @@ class ProviderSessionStatus:
 
     `resume_at` is only meaningful with `LIMIT_REACHED`: the moment the
     provider expects the session to become resumable, if known.
+
+    `usage` is an additive field (ADR 0005 anticipates the contract
+    growing this way): provider-specific accounting — token counts, cost,
+    turn counts — reported alongside a `FINISHED` status, or `None` when
+    a provider has nothing to report. Its shape is intentionally
+    provider-defined, like `SessionSpec.metadata`; nothing in
+    orchestration reads it today, so no provider is obligated to fill it.
     """
 
     state: ProviderSessionState
     detail: str | None = None
     resume_at: datetime | None = None
+    usage: dict[str, Any] | None = None
 
 
 class Provider(ABC):

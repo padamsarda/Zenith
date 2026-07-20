@@ -116,7 +116,12 @@ provider.stop_session(handle)
 `FINISHED`, or `FAILED`. `LIMIT_REACHED` (with optional `resume_at`) is
 deliberately first-class: it is the one interruption the orchestrator
 recovers from automatically, generalizing what
-`engineering_tools/watchdog` does manually for Claude Code today.
+`engineering_tools/watchdog` used to do manually for Claude Code (now
+automated by `ClaudeCodeProvider`, below). `ProviderSessionStatus` also
+carries `usage: dict[str, Any] | None` — an additive field (ADR 0005
+anticipated the contract growing this way) for provider-specific
+accounting such as token counts and cost; `None` when a provider has
+nothing to report.
 
 `SessionSpec.metadata` is the provider-specific extension point, like
 `Command.metadata`. Accounts are data, never classes; credentials are
@@ -126,6 +131,32 @@ account ID.
 `InMemoryProvider` is the reference implementation and universal test
 double. `ProviderRegistry` mirrors `ServiceRegistry`: explicit
 `register`/`get`/`has`/`list`, no discovery, no magic.
+
+### ClaudeCodeProvider
+
+The first real provider (ADR 0014, `engineering_manager/providers/
+claude_code.py`): runs `claude --print <instructions> --output-format
+json` as one non-interactive subprocess per session, in the task's
+project directory. `check_session` polls the subprocess rather than
+blocking on it; a background thread continuously drains its combined
+output so a long task cannot deadlock on a full pipe. A clean exit is
+parsed as the CLI's own JSON result (`is_error` distinguishes an
+application-level failure from a crash); a nonzero exit is scanned for
+the same session-limit line `engineering_tools/watchdog` detects —
+`SESSION_LIMIT_MARKER` and `parse_reset_time` are imported from it
+rather than re-derived — reporting `LIMIT_REACHED` with the parsed
+`resume_at`. `resume_session` starts a fresh `claude --continue`
+subprocess in the same directory, exactly the recovery the watchdog
+performs by hand.
+
+Credentials resolve from the account ID via an environment-variable
+convention (`ZENITH_CLAUDE_<ACCOUNT>_API_KEY`, normalized upper-case);
+without one, the subprocess inherits the environment unchanged and
+relies on however `claude` is already authenticated on the machine.
+Session tracking is in-memory only — a restart loses it for any session
+still running, which surfaces as an unknown-handle error the execution
+engine already treats as lost work and recovers from via the retry
+policy.
 
 ## Persistence (ADR 0004)
 
@@ -251,15 +282,17 @@ python -m engineering_manager plan approve <plan-id>
 python -m engineering_manager plan show <plan-id>       # execution waves
 python -m engineering_manager task approve <task-id>    # standalone tasks
 python -m engineering_manager task list --status READY
-python -m engineering_manager account add claude personal
+python -m engineering_manager account add claude-code personal
 python -m engineering_manager status
 python -m engineering_manager log
+python -m engineering_manager run --interval 30 --max-ticks 10
 ```
 
-The database defaults to `~/.zenith/engineering_manager.db`. Running
-the engine is not exposed in the CLI yet: it requires a registered
-`Provider`, and real provider integrations are the top roadmap item.
-Programmatic use:
+The database defaults to `~/.zenith/engineering_manager.db`. `run`
+registers `ClaudeCodeProvider` (`--claude-command` overrides the
+executable, default `claude`) and calls `manager.run()`; accounts must
+already exist (`account add claude-code <id>`) for anything to actually
+dispatch. Programmatic use, or wiring a different provider:
 
 ```python
 from pathlib import Path
@@ -279,10 +312,10 @@ report = manager.tick()
 Documented here so they read as decisions, not oversights (details in
 `docs/roadmap.md`):
 
-- **Real provider integrations** — the contract is proven against
-  `InMemoryProvider`; the first real adapter (Claude Code CLI,
-  generalizing the watchdog) is roadmap item one. It is also what the
-  CLI needs before a `run` command can be exposed.
+- **Real provider integrations** — shipped: `ClaudeCodeProvider` (ADR
+  0014), generalizing the watchdog, and the CLI's `run` command it
+  unblocked. A second real adapter (e.g. an HTTP-API provider) remains
+  the next pressure test of the contract's provider-agnosticism.
 - **AI-performed planning** — plans are the representation; a
   planning-provider session that writes a decomposition through the
   facade is future work needing no new mechanism.

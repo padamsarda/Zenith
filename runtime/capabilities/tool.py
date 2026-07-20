@@ -14,14 +14,19 @@ if TYPE_CHECKING:
 class ToolParameter:
     """Declares one argument a tool accepts.
 
-    Deliberately untyped beyond the name: parameters are described to
-    providers in prose, and a richer type vocabulary can be added to
-    this dataclass additively if a provider integration needs one.
+    `type` is a JSON Schema primitive type name (`"string"`, `"number"`,
+    `"boolean"`, `"integer"`, `"array"`, `"object"`), defaulting to
+    `"string"` so every existing declaration keeps its current meaning.
+    This is the additive extension ADR 0013 anticipated: parameters were
+    deliberately thin until a real provider integration needed a type
+    vocabulary to build tool-call schemas from (`runtime.providers.claude`
+    is the first to read it).
     """
 
     name: str
     description: str | None = None
     required: bool = True
+    type: str = "string"
 
 
 class Tool(ABC):

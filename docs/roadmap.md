@@ -13,20 +13,18 @@ assembly — shipped in ADRs 0008–0010. What remains is attaching real
 providers and hardening around them; orchestration itself should not
 need redesign.
 
-### 1. First real provider adapter (highest value)
+### 1. First real provider adapter (highest value) — shipped
 
-A `Provider` implementation that drives Claude Code as a subprocess,
-generalizing `engineering_tools/watchdog`: start a session in a
-project's working directory (`start_session`), detect completion and
-session limits (`check_session` reporting `LIMIT_REACHED` with
-`resume_at`), resume with `--continue` (`resume_session`), terminate
-(`stop_session`). The watchdog's parsing logic (limit detection, reset
-times) is proven and should be extracted, tested, and reused rather
-than rewritten. A second adapter (e.g. an HTTP-API provider) will then
-pressure-test the contract's provider-agnosticism; extend
-`Provider`/`SessionSpec` additively if it falls short (ADR 0005).
-With one real adapter, expose `run` in the CLI — the engine
-(`manager.run()`) is already the whole loop.
+`ClaudeCodeProvider` (`engineering_manager/providers/claude_code.py`,
+ADR 0014) drives Claude Code as a subprocess, generalizing
+`engineering_tools/watchdog`: starts a session in a project's working
+directory (`start_session`), detects completion and session limits
+(`check_session` reporting `LIMIT_REACHED` with `resume_at`, reusing the
+watchdog's proven parsing rather than rewriting it), resumes with
+`--continue` (`resume_session`), terminates (`stop_session`). `run` is
+now exposed in the CLI. A second adapter (e.g. an HTTP-API provider)
+remains the next pressure test of the contract's provider-agnosticism;
+extend `Provider`/`SessionSpec` additively if it falls short (ADR 0005).
 
 ### 2. AI-performed planning
 
@@ -68,16 +66,20 @@ foundation is in place: new capabilities, providers, and interfaces
 plug in without redesign (`docs/assistant.md`). What remains is filling
 it in.
 
-### 1. First real assistant provider (highest value)
+### 1. First real assistant provider (highest value) — shipped
 
-An `AssistantProvider` implementation calling a real API. One method,
-`generate_turn`, mapping `TurnBrief` to `AssistantTurn`: history to
-the vendor's message format, the `CapabilityCatalog` to its tool
-schema, its response back to text and `ToolCall`s. `ScriptedProvider`
-is the executable spec. A second adapter will pressure-test the
-contract's provider-agnosticism; extend it additively if it falls
-short (ADR 0011). Whether `ToolParameter` needs a real type vocabulary
-(JSON Schema) will be answered here, not before.
+`ClaudeProvider` (`runtime/providers/claude.py`, ADR 0015) calls the
+Claude Messages API directly over `urllib` (standard library only).
+`generate_turn` maps `TurnBrief` to `AssistantTurn`: history to Claude's
+message format (`claude_messages.py`), the `CapabilityCatalog` to its
+tool schema, its response back to text and `ToolCall`s — including a
+`ToolCallCache` that reconstructs `tool_use`/`tool_result` pairs across
+turns with no engine change. `ToolParameter` gained the real type
+vocabulary (JSON Schema) the previous version of this item asked
+whether it would need — it did, and `type: str = "string"` answers it,
+additively. A second adapter remains the next pressure test of the
+contract's provider-agnosticism; extend it additively if it falls short
+(ADR 0011).
 
 ### 2. Durable conversations
 
@@ -95,14 +97,19 @@ the framework and events already exist. This is what makes
 `Plugin.register(registry)` the real distribution mechanism for tools
 and skills (ADR 0013) rather than a hook nothing calls.
 
-### 4. First real tools and skills
+### 4. First real tools and skills — shipped
 
-Assistant behaviors as registered `Tool`s and `Skill`s. Every one runs
-through the pipeline, so it is validated, permission-gated, timed, and
-observable from day one. The first tool that can genuinely act on the
-world is also what makes `AllowAllPolicy` inadequate — a real
-`PermissionPolicy` (allowlists, per-tool confirmation) belongs with
-it, not before it.
+`runtime/tools/` (ADR 0016): `FilesystemTool`, `ShellTool`, `GitTool`,
+`DiffTool`, and `TestRunnerTool`, every one a plain `Tool` running
+through the existing pipeline unchanged — validated, permission-gated,
+timed, and observable from day one, exactly as the pipeline promised.
+`ToolAllowlistPolicy` (`runtime/assistant/permissions.py`) is the real
+`PermissionPolicy` this milestone anticipated: `AllowAllPolicy` stopped
+being honest the moment a tool could genuinely act on the world.
+Per-tool user confirmation remains open — a `before_tool` `AssistantHook`
+is the seam for it, not a new mechanism. Skills remain unstarted; the
+first genuine skill (as opposed to a tool) is the next piece of this
+item.
 
 ### 5. Richer interfaces
 

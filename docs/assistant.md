@@ -121,7 +121,11 @@ reported to the provider as a failed call, and never escapes the
 pipeline.
 
 `ToolParameter` is deliberately thin: `name`, optional `description`,
-`required`. No type vocabulary until a real integration needs one.
+`required`, and `type` (a JSON Schema primitive type name, defaulting to
+`"string"`). `type` is the one additive extension made so far — added
+for `runtime.providers.claude`, the first real provider integration that
+needed a type vocabulary to build tool-call schemas from (ADR 0013,
+ADR 0015).
 
 ### Skill
 
@@ -140,6 +144,55 @@ instructions are composed into the brief, ordered by skill ID.
 `instructions` **must be deterministic** for a given request — briefs
 must be reproducible from the same state (ADR 0010's principle applied
 to assistant behavior).
+
+### Built-in tools (ADR 0016)
+
+`runtime/tools/` holds concrete `Tool` implementations, parallel to how
+`runtime/providers/` holds concrete `AssistantProvider`s alongside the
+abstract contract in `providers/base.py`. Every one runs through the
+ordinary pipeline — `ToolRegistry`, `CommandExecutor`, `PermissionPolicy`,
+`AssistantHook` — with no engine change, and none is auto-registered:
+like `ClaudeProvider`, an integrator constructs each with the sandbox
+root(s) its deployment allows and registers it explicitly.
+
+| Tool | `tool_id` | What it does |
+|---|---|---|
+| `FilesystemTool` | `filesystem` | `read`/`write`/`list`/`mkdir`/`delete`/`exists`, sandboxed to a root directory. |
+| `ShellTool` | `shell` | Runs one shell command line with configurable `cwd` (sandboxed), `env`, and `timeout_seconds`. |
+| `GitTool` | `git` | `status`/`diff`/`add`/`commit`/`branch`/`checkout`/`log`/`reset` (mixed mode only) against a repository. No `push`, `pull`, `clone`, or `--hard`. |
+| `DiffTool` | `diff` | A unified diff (`difflib`) between two inline texts or two sandboxed files. |
+| `TestRunnerTool` | `test_runner` | Runs the test suite (`python -m pytest` by default) and reports the exit code, captured output, and best-effort pass/fail counts. |
+
+`FilesystemTool`, `ShellTool` (`cwd`), `GitTool` (path arguments), and
+`TestRunnerTool` (`path`) all confine their path arguments to a
+configured root through `runtime.tools.sandbox.resolve_within_root`, one
+guard shared by every one of them rather than five slightly different
+checks. `ShellTool`, `GitTool`, and `TestRunnerTool` shell out through
+`runtime.tools.process.run_process`, which enforces a timeout and checks
+`CommandContext.cancellation_token` — raising `CommandCancelledError` if
+it is set — the reserved seam `docs/commands.md` describes, now with its
+first real user.
+
+Registering one:
+
+```python
+from pathlib import Path
+
+from runtime.assistant.permissions import ToolAllowlistPolicy
+from runtime.tools.filesystem import FilesystemTool
+from runtime.tools.git import GitTool
+
+project_root = Path("/path/to/project")
+context.tools.register(FilesystemTool(project_root), context)
+context.tools.register(GitTool(project_root), context)
+context.assistant.set_permission_policy(
+    ToolAllowlistPolicy(["filesystem", "git"])
+)
+```
+
+`ToolAllowlistPolicy` (see Permissions and hooks, below) is the real
+`PermissionPolicy` this tool suite calls for — `AllowAllPolicy` is no
+longer honest once a registered tool can act on the world.
 
 ### Registries and the catalog
 
@@ -190,7 +243,7 @@ Engineering Manager's `ProviderRegistry`: explicit register/get/has/
 list, and — like it — no events, since providers are wired once at
 startup rather than churning as the runtime runs.
 
-Two implementations ship:
+Implementations that ship:
 
 - **`EchoProvider`** (`provider_id="echo"`) — echoes the latest user
   message. Registered by `Runtime.start`, so the whole pipeline is
@@ -200,6 +253,27 @@ Two implementations ship:
   fixed sequence of turns and records every brief it received. The
   executable specification and universal test double, the counterpart
   of `InMemoryProvider`.
+- **`ClaudeProvider`** (`provider_id="claude"`, `runtime/providers/claude.py`)
+  — the first real integration (ADR 0015), calling the Anthropic
+  Messages API directly over `urllib` (standard library only; no
+  `anthropic` SDK dependency). Not wired in automatically like
+  `EchoProvider`; register it explicitly where credentials are
+  available:
+
+  ```python
+  from runtime.providers.claude import ClaudeProvider
+
+  context.assistant_providers.register(ClaudeProvider())  # reads ANTHROPIC_API_KEY
+  ```
+
+  Split across three modules by responsibility: `claude_transport.py`
+  (stdlib HTTP, retries, timeouts, streaming), `claude_messages.py`
+  (conversation and tool-call translation, including the `ToolCallCache`
+  that reconstructs `tool_use`/`tool_result` pairs across turns), and
+  `claude.py` (the `AssistantProvider` itself: request composition, usage
+  accounting, logging). `ClaudeProvider.usage` exposes cumulative token
+  counts; nothing in the pipeline consumes it yet, but it is there to
+  inspect or log downstream.
 
 ## The request pipeline (ADR 0012)
 
@@ -307,6 +381,17 @@ nothing else.
 context.assistant.set_permission_policy(MyPolicy())
 ```
 
+`ToolAllowlistPolicy` ships alongside the built-in tools (ADR 0016): it
+permits only the `tool_id`s named at construction and denies everything
+else, with a reason recorded in the conversation.
+
+```python
+context.assistant.set_permission_policy(ToolAllowlistPolicy(["filesystem", "git"]))
+```
+
+Per-tool user confirmation is not built — a `before_tool`
+`AssistantHook` is the seam for it, not a new mechanism.
+
 `AssistantHook` (`runtime/assistant/hooks.py`) is arbitrary code at
 four points. The two kinds differ deliberately:
 
@@ -384,14 +469,18 @@ Added to `runtime.exceptions`, all rooted at `ZenithError`:
 | Base | Subclasses |
 |---|---|
 | `ConversationError` | `ConversationNotFoundError`, `ConversationValidationError` |
-| `CapabilityError` | `CapabilityValidationError`, `ToolRegistrationError`, `ToolNotFoundError`, `SkillRegistrationError`, `SkillNotFoundError` |
+| `CapabilityError` | `CapabilityValidationError`, `ToolRegistrationError`, `ToolNotFoundError`, `SkillRegistrationError`, `SkillNotFoundError`, `ToolExecutionError` |
 | `AssistantError` | `AssistantProviderError`, `AssistantProviderRegistrationError`, `AssistantProviderNotFoundError`, `RequestValidationError` |
+
+`ToolExecutionError` is raised by a built-in tool's own guards (a path
+escaping its sandbox root, a missing git repository, a subprocess that
+failed to start) — see ADR 0016.
 
 ## Extending the runtime
 
 | To add… | Do this |
 |---|---|
-| A tool | Subclass `Tool`, `context.tools.register(tool, context)`. |
+| A tool | Subclass `Tool`, `context.tools.register(tool, context)`. `runtime/tools/` holds the built-in ones (ADR 0016). |
 | A skill | Subclass `Skill`, `context.skills.register(skill, context)`. |
 | A provider | Subclass `AssistantProvider`, `context.assistant_providers.register(provider)`. |
 | A permission rule | Subclass `PermissionPolicy`, `context.assistant.set_permission_policy(policy)`. |
@@ -410,18 +499,26 @@ Documented so they read as decisions, not oversights:
   Engineering Manager's SQLite store (ADR 0004) is the proven pattern,
   and briefs are already assembled from durable state, so nothing else
   changes.
-- **Real provider integrations** — the contract is proven against
-  `ScriptedProvider` and `EchoProvider`; a real adapter implements one
-  method.
+- **Real provider integrations** — shipped: `ClaudeProvider` (ADR 0015)
+  implements the one method (`generate_turn`) the contract asks for. A
+  second real integration remains the next pressure test of the
+  contract's provider-agnosticism.
 - **Plugin-contributed capabilities** — `Plugin.register(registry)` is
   where a plugin will contribute tools and skills. It needs the plugin
   *loader* (`docs/plugins.md`), which remains future work; the
   registries it will call already exist.
 - **Streaming and concurrency** — synchronous throughout (ADR 0007).
   Both fit behind `handle` when they are needed.
-- **Cooperative cancellation** — `RequestStatus.CANCELLED` and
-  `CommandContext.cancellation_token` are the reserved places; nothing
-  sets either yet.
-- **Structured tool results** — tool output is stringified into a
-  `TOOL` message. If providers need structure, `Message.metadata` is
-  where it goes.
+- **Cooperative cancellation** — `RequestStatus.CANCELLED` is still
+  unused, but `CommandContext.cancellation_token` has its first real
+  reader: `runtime.tools.process.run_process` (ADR 0016) checks it
+  before and during every subprocess it runs and raises
+  `CommandCancelledError` if it is set. Nothing yet *sets* a token to
+  `cancelled` mid-flight — it is immutable once constructed — so this
+  is forward-looking today, directly testable by constructing a
+  pre-cancelled `CommandContext` and calling `invoke` directly.
+- **Structured tool results** — tool output is still stringified into a
+  `TOOL` message; the built-in tools' result dataclasses
+  (`FilesystemResult`, `ShellResult`, `GitResult`, `DiffResult`,
+  `TestRunResult`) define `__str__` accordingly. If providers need
+  structure, `Message.metadata` is where it goes.

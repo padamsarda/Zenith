@@ -71,6 +71,7 @@ def test_tool_parameter_defaults() -> None:
 
     assert parameter.description is None
     assert parameter.required is True
+    assert parameter.type == "string"
 
 
 def test_tool_parameter_is_frozen() -> None:

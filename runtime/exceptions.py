@@ -130,6 +130,20 @@ class SkillNotFoundError(CapabilityError):
     """
 
 
+class ToolExecutionError(CapabilityError):
+    """Raised by a built-in `Tool` implementation when it cannot complete
+    its action.
+
+    Covers a tool's own domain-level guards (a Filesystem path escaping
+    its sandbox root, a Git operation outside a repository, malformed
+    arguments) as well as underlying OS/subprocess failures (the
+    executable could not be started). `Tool.invoke` runs inside a
+    `Command` action, so the `CommandExecutor` treats this the same as
+    any other exception: caught, reported as a failed tool call, and
+    never propagated out of the assistant pipeline.
+    """
+
+
 class AssistantError(ZenithError):
     """Base class for all assistant pipeline errors."""
 
