@@ -18,9 +18,15 @@ from typing import Any
 from uuid import UUID
 
 from engineering_manager.domain.account import ProviderAccount
+from engineering_manager.domain.plan import Plan
 from engineering_manager.domain.project import Project
 from engineering_manager.domain.session import Session
-from engineering_manager.domain.states import ProjectStatus, SessionStatus, TaskStatus
+from engineering_manager.domain.states import (
+    PlanStatus,
+    ProjectStatus,
+    SessionStatus,
+    TaskStatus,
+)
 from engineering_manager.domain.task import Task
 from shared.events.event import Event
 
@@ -66,6 +72,30 @@ def project_from_row(row: sqlite3.Row) -> Project:
     )
 
 
+def plan_to_row(plan: Plan) -> dict[str, Any]:
+    """Convert a Plan to a database row dict."""
+    return {
+        "plan_id": str(plan.plan_id),
+        "project_id": plan.project_id,
+        "goal": plan.goal,
+        "description": plan.description,
+        "status": plan.status.name,
+        "created_at": plan.created_at.isoformat(),
+    }
+
+
+def plan_from_row(row: sqlite3.Row) -> Plan:
+    """Rebuild a Plan from a database row."""
+    return Plan(
+        plan_id=UUID(row["plan_id"]),
+        project_id=row["project_id"],
+        goal=row["goal"],
+        description=row["description"],
+        status=PlanStatus[row["status"]],
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
 def task_to_row(task: Task) -> dict[str, Any]:
     """Convert a Task to a database row dict."""
     return {
@@ -75,6 +105,7 @@ def task_to_row(task: Task) -> dict[str, Any]:
         "description": task.description,
         "priority": task.priority,
         "depends_on": json.dumps(sorted(str(dep) for dep in task.depends_on)),
+        "plan_id": str(task.plan_id) if task.plan_id else None,
         "status": task.status.name,
         "created_at": task.created_at.isoformat(),
     }
@@ -89,6 +120,7 @@ def task_from_row(row: sqlite3.Row) -> Task:
         description=row["description"],
         priority=row["priority"],
         depends_on=frozenset(UUID(dep) for dep in json.loads(row["depends_on"])),
+        plan_id=UUID(row["plan_id"]) if row["plan_id"] else None,
         status=TaskStatus[row["status"]],
         created_at=datetime.fromisoformat(row["created_at"]),
     )
@@ -105,6 +137,7 @@ def session_to_row(session: Session) -> dict[str, Any]:
         "model": session.model,
         "external_ref": session.external_ref,
         "summary": session.summary,
+        "resume_at": session.resume_at.isoformat() if session.resume_at else None,
         "status": session.status.name,
         "started_at": session.started_at.isoformat(),
         "ended_at": session.ended_at.isoformat() if session.ended_at else None,
@@ -122,6 +155,7 @@ def session_from_row(row: sqlite3.Row) -> Session:
         model=row["model"],
         external_ref=row["external_ref"],
         summary=row["summary"],
+        resume_at=datetime.fromisoformat(row["resume_at"]) if row["resume_at"] else None,
         status=SessionStatus[row["status"]],
         started_at=datetime.fromisoformat(row["started_at"]),
         ended_at=datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None,

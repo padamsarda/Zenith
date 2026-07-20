@@ -333,3 +333,76 @@ def test_dispatcher_publishes_events_to_log(harness: Harness) -> None:
         "SessionStarted",
         "TaskStatusChanged",  # READY -> IN_PROGRESS
     ]
+
+
+def test_task_in_draft_plan_is_not_eligible(harness: Harness) -> None:
+    from engineering_manager.domain.plan import Plan
+    from engineering_manager.domain.states import PlanStatus
+
+    harness.add_project()
+    plan = Plan(project_id="zenith", goal="Ship plugins")
+    harness.store.add_plan(plan)
+    task = Task(
+        project_id="zenith", title="Planned", plan_id=plan.plan_id, status=TaskStatus.READY
+    )
+    harness.store.add_task(task)
+
+    assert harness.dispatcher.eligible_tasks() == []
+
+    plan.transition_to(PlanStatus.IN_PROGRESS)
+    harness.store.update_plan(plan)
+
+    assert [t.task_id for t in harness.dispatcher.eligible_tasks()] == [task.task_id]
+
+
+def test_dispatch_briefing_carries_dependency_summaries(harness: Harness) -> None:
+    harness.add_project()
+    harness.add_account()
+    dependency = harness.add_ready_task("Design the API")
+    dependent = harness.add_ready_task(
+        "Write the loader", depends_on=frozenset({dependency.task_id})
+    )
+    session = harness.dispatcher.dispatch()
+    assert session.task_id == dependency.task_id
+    harness.dispatcher.complete_session(session.session_id, summary="Registry API landed.")
+    accepted = harness.store.get_task(dependency.task_id)
+    accepted.transition_to(TaskStatus.DONE)
+    harness.store.update_task(accepted)
+
+    dispatched = harness.dispatcher.dispatch()
+
+    assert dispatched.task_id == dependent.task_id
+    spec = harness.provider.started_specs[-1]
+    assert "Design the API: Registry API landed." in spec.instructions
+
+
+def test_interrupt_records_resume_at(harness: Harness) -> None:
+    from datetime import datetime, timezone
+
+    harness.add_project()
+    harness.add_ready_task()
+    harness.add_account()
+    session = harness.dispatcher.dispatch()
+    moment = datetime(2026, 7, 20, 17, 0, 0, tzinfo=timezone.utc)
+
+    interrupted = harness.dispatcher.interrupt_session(session.session_id, resume_at=moment)
+
+    assert interrupted.resume_at == moment
+    assert harness.store.get_session(session.session_id).resume_at == moment
+
+
+def test_resume_clears_resume_at(harness: Harness) -> None:
+    from datetime import datetime, timezone
+
+    harness.add_project()
+    harness.add_ready_task()
+    harness.add_account()
+    session = harness.dispatcher.dispatch()
+    harness.dispatcher.interrupt_session(
+        session.session_id, resume_at=datetime(2026, 7, 20, tzinfo=timezone.utc)
+    )
+
+    resumed = harness.dispatcher.resume_session(session.session_id)
+
+    assert resumed.resume_at is None
+    assert harness.store.get_session(session.session_id).resume_at is None

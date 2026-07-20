@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -25,8 +26,36 @@ def test_session_defaults() -> None:
     assert session.external_ref is None
     assert session.ended_at is None
     assert session.summary is None
+    assert session.resume_at is None
     assert isinstance(session.session_id, UUID)
     assert session.started_at.tzinfo is not None
+
+
+def test_set_resume_at_records_and_clears_the_moment() -> None:
+    session = make_session()
+    moment = datetime(2026, 7, 20, 17, 0, 0, tzinfo=timezone.utc)
+
+    session.set_resume_at(moment)
+    assert session.resume_at == moment
+
+    session.set_resume_at(None)
+    assert session.resume_at is None
+
+
+def test_set_resume_at_rejects_non_datetime() -> None:
+    session = make_session()
+
+    with pytest.raises(DomainValidationError):
+        session.set_resume_at("later")  # type: ignore[arg-type]
+
+
+def test_set_resume_at_rejected_after_close() -> None:
+    session = make_session()
+    session.transition_to(SessionStatus.COMPLETED)
+    session.close("done")
+
+    with pytest.raises(DomainValidationError):
+        session.set_resume_at(datetime(2026, 7, 20, tzinfo=timezone.utc))
 
 
 def test_session_fields_are_frozen() -> None:

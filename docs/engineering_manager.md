@@ -21,8 +21,12 @@ EngineeringManager (manager.py)          the facade every interface uses
   ├─ Store (store/)                      SQLite persistence + event log
   ├─ ProviderRegistry (providers/)       available Provider integrations
   ├─ EventBus (shared/events)            live in-process notifications
-  └─ Dispatcher (orchestration/)         task -> account -> session
-       └─ AssignmentPolicy               chooses the account
+  ├─ PlanCoordinator (orchestration/)    goal -> plan -> approved tasks
+  ├─ Dispatcher (orchestration/)         task -> account -> session
+  │    ├─ AssignmentPolicy               chooses the account
+  │    └─ ContextAssembler               composes the session brief
+  └─ ExecutionEngine (orchestration/)    the reconcile-and-advance tick
+       └─ RetryPolicy                    decides if failed work reruns
 ```
 
 Domain objects (`domain/`) follow the same patterns as the runtime's
@@ -36,9 +40,26 @@ transition table.
 | Entity | Identity | Lifecycle |
 |---|---|---|
 | `Project` | author-chosen slug (`project_id`) | `ACTIVE <-> PAUSED`, `-> ARCHIVED` (terminal) |
+| `Plan` | auto UUID | `DRAFT -> IN_PROGRESS -> COMPLETED`, `-> CANCELLED` (both terminal) |
 | `Task` | auto UUID | see below |
 | `Session` | auto UUID | `ACTIVE <-> INTERRUPTED`, ending `COMPLETED` / `FAILED` / `ABANDONED` |
 | `ProviderAccount` | (`provider_id`, `account_id`) | none — declarative data |
+
+### Plan (ADR 0009)
+
+A plan is how a high-level goal becomes executable work: one goal,
+stated once, decomposed into tasks that reference it via
+`Task.plan_id` (standalone tasks remain first-class). `approve_plan`
+is gate one in bulk — the plan moves to `IN_PROGRESS` and its DRAFT
+tasks to `READY`; nothing in an unapproved plan is eligible for
+dispatch. The plan completes itself when its last task reaches a
+terminal status. Tasks may join an `IN_PROGRESS` plan as new work is
+discovered, and `add_task_dependency` lets existing schedulable tasks
+gain predecessors — guarded by an explicit cycle check
+(`orchestration/graph.py`). The graph module also *derives* execution
+structure on demand: `execution_waves` (what may run in parallel) and
+`blockages` (what is blocked, or doomed by a cancelled dependency —
+surfaced via `manager.blocked_tasks`).
 
 ### Task lifecycle (ADR 0006)
 
@@ -71,9 +92,12 @@ A `Session` is one continuous stretch of provider work on one task. Its
 `external_ref` is the opaque provider-side reference (conversation ID,
 process handle, …) that makes an `INTERRUPTED` session resumable rather
 than restartable — interruption is expected (session limits), so it is
-modeled, not treated as failure. Sessions are mutated only through
-validated methods: `transition_to`, `update_external_ref` (a resume may
-issue a fresh reference), and `close` (stamps `ended_at`/`summary` once
+modeled, not treated as failure. `resume_at` records when the execution
+engine may resume an interrupted session automatically; `None` means a
+human must (`AWAITING_INPUT` interruptions are never auto-resumed).
+Sessions are mutated only through validated methods: `transition_to`,
+`update_external_ref` (a resume may issue a fresh reference),
+`set_resume_at`, and `close` (stamps `ended_at`/`summary` once
 terminal).
 
 ## Provider abstraction (ADR 0005)
@@ -126,8 +150,8 @@ truth — this is not event sourcing.
 ## Orchestration
 
 `Dispatcher.eligible_tasks()` returns tasks that are `READY`, in an
-`ACTIVE` project, with all dependencies `DONE` — highest priority
-first, then oldest.
+`ACTIVE` project, whose plan (if any) is `IN_PROGRESS`, with all
+dependencies `DONE` — highest priority first, then oldest.
 
 `Dispatcher.dispatch()`:
 
@@ -158,15 +182,60 @@ session per account and picks the first free one; smarter policies
 (cost, capability, past performance) replace the class without touching
 the dispatcher.
 
+### The execution engine (ADR 0008)
+
+`ExecutionEngine` (`orchestration/engine.py`) is what turns all of the
+above from bookkeeping into autonomous execution. One synchronous,
+deterministic `tick()` advances the whole system in a fixed order:
+
+1. **Reconcile** every `ACTIVE` session against `check_session`:
+   `FINISHED` → `complete_session` (the provider's `detail` becomes the
+   session summary); `FAILED` → `fail_session`; `LIMIT_REACHED` →
+   `interrupt_session` with a `resume_at` (the provider's, or now + a
+   configured backoff); `AWAITING_INPUT` → interrupt with no
+   `resume_at` plus an `AttentionRequired` event. A provider that
+   *raises* has lost the session — it is failed and recovered like any
+   other failure, which is the entire crash-recovery story: after a
+   restart, the next tick reconciles persisted state against provider
+   truth exactly like any other tick.
+2. **Resume** every `INTERRUPTED` session whose `resume_at` has passed.
+3. **Retry** every `FAILED` task the `RetryPolicy` approves
+   (`orchestration/retry.py`; default `LimitedRetryPolicy`, three
+   attempts, counted from the persisted session history — never
+   stored). Exhausted tasks stay `FAILED` for a human, announced once
+   via `AttentionRequired`.
+4. **Dispatch** eligible tasks until none remain or accounts saturate.
+
+`tick()` returns a frozen `TickReport` of everything that moved.
+`run()` is only `tick()` on an interval with an injectable `sleep` —
+every decision lives in the tick (ADR 0007). The engine holds no state
+between ticks; parallelism is the dependency graph's width bounded by
+free accounts, and "which provider does what" remains entirely the
+`AssignmentPolicy`'s answer.
+
+### Context between sessions (ADR 0010)
+
+`ContextAssembler` (`orchestration/context.py`) composes each
+dispatched session's instructions deterministically from durable state:
+project, plan goal, task description, summaries of `DONE`
+dependencies' completing sessions, and summaries of this task's failed
+or abandoned attempts. Session summaries are the only interchange —
+providers influence future context purely by summarizing well. Nothing
+is stored, so the brief can never go stale and survives restarts by
+construction.
+
 ## Events
 
 Defined in `engineering_manager/events.py`, emitted with
 `source="engineering_manager"`, persisted to the event log, and emitted
-on the bus: `ProjectAdded`, `ProjectStatusChanged`, `TaskAdded`,
+on the bus: `ProjectAdded`, `ProjectStatusChanged`, `PlanAdded`,
+`PlanStatusChanged`, `TaskAdded`, `TaskDependencyAdded`,
 `TaskStatusChanged`, `SessionStarted`, `SessionStatusChanged`,
-`AccountAdded`, `AccountRemoved`. Status-change events carry
-`from`/`to` in the payload; subscribers filter on payload rather than
-having one event type per transition.
+`AttentionRequired`, `AccountAdded`, `AccountRemoved`. Status-change
+events carry `from`/`to` in the payload; subscribers filter on payload
+rather than having one event type per transition. `AttentionRequired`
+is the engine's signal that only a human can move something forward
+(payload `kind`: `session_awaiting_input` or `task_retries_exhausted`).
 
 ## CLI
 
@@ -175,17 +244,22 @@ python -m engineering_manager [--db PATH] <command>
 
 python -m engineering_manager init
 python -m engineering_manager project add zenith "Zenith" --path .
-python -m engineering_manager task add zenith "Implement the loader" --priority 5
-python -m engineering_manager task approve <task-id>
+python -m engineering_manager plan add zenith "Ship plugin support"
+python -m engineering_manager task add zenith "Implement the loader" --plan <plan-id> --priority 5
+python -m engineering_manager task depend <task-id> <depends-on-id>
+python -m engineering_manager plan approve <plan-id>
+python -m engineering_manager plan show <plan-id>       # execution waves
+python -m engineering_manager task approve <task-id>    # standalone tasks
 python -m engineering_manager task list --status READY
 python -m engineering_manager account add claude personal
 python -m engineering_manager status
 python -m engineering_manager log
 ```
 
-The database defaults to `~/.zenith/engineering_manager.db`. Dispatch
-is not exposed in the CLI yet: it requires a registered `Provider`, and
-real provider integrations are the top roadmap item. Programmatic use:
+The database defaults to `~/.zenith/engineering_manager.db`. Running
+the engine is not exposed in the CLI yet: it requires a registered
+`Provider`, and real provider integrations are the top roadmap item.
+Programmatic use:
 
 ```python
 from pathlib import Path
@@ -195,7 +269,9 @@ from engineering_manager.store.store import Store
 manager = EngineeringManager(Store(Path.home() / ".zenith" / "engineering_manager.db"))
 manager.register_provider(my_provider)          # a Provider implementation
 manager.add_account(my_provider.provider_id, "personal")
-session = manager.dispatch()                    # highest-priority READY task
+manager.run(interval_seconds=30.0)              # the autonomous loop
+# ...or advance one deterministic step at a time:
+report = manager.tick()
 ```
 
 ## Deliberate deferrals
@@ -205,12 +281,13 @@ Documented here so they read as decisions, not oversights (details in
 
 - **Real provider integrations** — the contract is proven against
   `InMemoryProvider`; the first real adapter (Claude Code CLI,
-  generalizing the watchdog) is roadmap item one.
-- **The autonomous scheduler loop** — a long-running process that polls
-  `check_session`, resumes on `LIMIT_REACHED`, and dispatches as
-  accounts free up. All of its building blocks exist and are tested.
+  generalizing the watchdog) is roadmap item one. It is also what the
+  CLI needs before a `run` command can be exposed.
+- **AI-performed planning** — plans are the representation; a
+  planning-provider session that writes a decomposition through the
+  facade is future work needing no new mechanism.
 - **Cross-call transactions** — each store method commits itself;
   fine while one process owns the database (ADR 0004).
-- **Context/knowledge handoff between sessions** — what a session
-  learned lives only in `summary` for now; structured context transfer
-  is a designed-for but unbuilt layer.
+- **Richer completion reports** — context assembly (ADR 0010) reads
+  session summaries; if summaries prove too thin, sessions gain a
+  structured completion report feeding the same assembler.

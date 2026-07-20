@@ -67,3 +67,42 @@ def test_task_dependencies_are_stored_as_given() -> None:
     task = Task(project_id="zenith", title="Write docs", depends_on=dependency_ids)
 
     assert task.depends_on == dependency_ids
+
+
+def test_task_has_no_plan_by_default() -> None:
+    assert Task(project_id="zenith", title="Write docs").plan_id is None
+
+
+def test_add_dependency_grows_the_set() -> None:
+    existing = uuid4()
+    new_dependency = uuid4()
+    task = Task(project_id="zenith", title="Write docs", depends_on=frozenset({existing}))
+
+    task.add_dependency(new_dependency)
+
+    assert task.depends_on == frozenset({existing, new_dependency})
+
+
+def test_add_dependency_rejects_self() -> None:
+    task = Task(project_id="zenith", title="Write docs")
+
+    with pytest.raises(DomainValidationError):
+        task.add_dependency(task.task_id)
+
+
+def test_add_dependency_rejects_duplicate() -> None:
+    dependency_id = uuid4()
+    task = Task(
+        project_id="zenith", title="Write docs", depends_on=frozenset({dependency_id})
+    )
+
+    with pytest.raises(DomainValidationError):
+        task.add_dependency(dependency_id)
+
+
+def test_add_dependency_rejected_once_in_progress() -> None:
+    task = Task(project_id="zenith", title="Write docs", status=TaskStatus.IN_PROGRESS)
+
+    with pytest.raises(DomainValidationError):
+        task.add_dependency(uuid4())
+    assert task.depends_on == frozenset()

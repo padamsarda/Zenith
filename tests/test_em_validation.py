@@ -2,23 +2,34 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from engineering_manager.domain.account import ProviderAccount
+from engineering_manager.domain.plan import Plan
 from engineering_manager.domain.project import Project
 from engineering_manager.domain.session import Session
-from engineering_manager.domain.states import ProjectStatus, SessionStatus, TaskStatus
+from engineering_manager.domain.states import (
+    PlanStatus,
+    ProjectStatus,
+    SessionStatus,
+    TaskStatus,
+)
 from engineering_manager.domain.task import Task
 from engineering_manager.domain.validation import (
     validate_account,
+    validate_dependency_addition,
     validate_depends_on,
     validate_identifier,
+    validate_plan,
+    validate_plan_status_transition,
     validate_priority,
     validate_project,
     validate_project_status_transition,
+    validate_resume_at,
     validate_session,
     validate_session_status_transition,
     validate_task,
@@ -40,6 +51,28 @@ def test_archived_project_accepts_no_transition() -> None:
     for new in ProjectStatus:
         with pytest.raises(DomainValidationError):
             validate_project_status_transition(ProjectStatus.ARCHIVED, new)
+
+
+def test_draft_plan_can_start_or_cancel() -> None:
+    validate_plan_status_transition(PlanStatus.DRAFT, PlanStatus.IN_PROGRESS)
+    validate_plan_status_transition(PlanStatus.DRAFT, PlanStatus.CANCELLED)
+
+
+def test_draft_plan_cannot_complete_directly() -> None:
+    with pytest.raises(DomainValidationError):
+        validate_plan_status_transition(PlanStatus.DRAFT, PlanStatus.COMPLETED)
+
+
+def test_in_progress_plan_can_complete_or_cancel() -> None:
+    validate_plan_status_transition(PlanStatus.IN_PROGRESS, PlanStatus.COMPLETED)
+    validate_plan_status_transition(PlanStatus.IN_PROGRESS, PlanStatus.CANCELLED)
+
+
+def test_terminal_plans_accept_no_transition() -> None:
+    for terminal in (PlanStatus.COMPLETED, PlanStatus.CANCELLED):
+        for new in PlanStatus:
+            with pytest.raises(DomainValidationError):
+                validate_plan_status_transition(terminal, new)
 
 
 def test_draft_task_can_become_ready_or_cancelled() -> None:
@@ -145,6 +178,63 @@ def test_validate_depends_on_rejects_self_dependency() -> None:
         validate_depends_on(frozenset({task_id}), task_id)
 
 
+def test_validate_dependency_addition_accepts_new_uuid_on_draft_task() -> None:
+    validate_dependency_addition(Task(project_id="zenith", title="Work"), uuid4())
+
+
+def test_validate_dependency_addition_rejects_non_uuid() -> None:
+    with pytest.raises(DomainValidationError):
+        validate_dependency_addition(
+            Task(project_id="zenith", title="Work"), "not-a-uuid"  # type: ignore[arg-type]
+        )
+
+
+def test_validate_dependency_addition_rejects_self() -> None:
+    task = Task(project_id="zenith", title="Work")
+    with pytest.raises(DomainValidationError):
+        validate_dependency_addition(task, task.task_id)
+
+
+def test_validate_dependency_addition_rejects_duplicate() -> None:
+    dependency_id = uuid4()
+    task = Task(project_id="zenith", title="Work", depends_on=frozenset({dependency_id}))
+    with pytest.raises(DomainValidationError):
+        validate_dependency_addition(task, dependency_id)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [TaskStatus.IN_PROGRESS, TaskStatus.NEEDS_REVIEW, TaskStatus.DONE, TaskStatus.CANCELLED],
+)
+def test_validate_dependency_addition_rejects_unschedulable_statuses(
+    status: TaskStatus,
+) -> None:
+    task = Task(project_id="zenith", title="Work", status=status)
+    with pytest.raises(DomainValidationError):
+        validate_dependency_addition(task, uuid4())
+
+
+@pytest.mark.parametrize(
+    "status", [TaskStatus.DRAFT, TaskStatus.READY, TaskStatus.FAILED]
+)
+def test_validate_dependency_addition_accepts_schedulable_statuses(
+    status: TaskStatus,
+) -> None:
+    validate_dependency_addition(
+        Task(project_id="zenith", title="Work", status=status), uuid4()
+    )
+
+
+def test_validate_resume_at_accepts_datetime_and_none() -> None:
+    validate_resume_at(datetime(2026, 7, 20, tzinfo=timezone.utc))
+    validate_resume_at(None)
+
+
+def test_validate_resume_at_rejects_other_types() -> None:
+    with pytest.raises(DomainValidationError):
+        validate_resume_at("2026-07-20T00:00:00")
+
+
 def test_validate_project_accepts_well_formed_project(tmp_path: Path) -> None:
     validate_project(Project(project_id="zenith", name="Zenith", root_path=tmp_path))
 
@@ -159,6 +249,15 @@ def test_validate_project_rejects_non_path_root(tmp_path: Path) -> None:
         validate_project(
             Project(project_id="zenith", name="Zenith", root_path=str(tmp_path))  # type: ignore[arg-type]
         )
+
+
+def test_validate_plan_accepts_well_formed_plan() -> None:
+    validate_plan(Plan(project_id="zenith", goal="Ship plugins"))
+
+
+def test_validate_plan_rejects_blank_goal() -> None:
+    with pytest.raises(DomainValidationError):
+        validate_plan(Plan(project_id="zenith", goal="  "))
 
 
 def test_validate_task_accepts_well_formed_task() -> None:

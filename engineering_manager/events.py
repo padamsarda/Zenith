@@ -33,6 +33,23 @@ class ProjectStatusChanged(Event):
 
 
 @dataclass(frozen=True)
+class PlanAdded(Event):
+    """Emitted when a goal is recorded as a plan.
+
+    Payload: `plan_id`, `project_id`, `goal`.
+    """
+
+
+@dataclass(frozen=True)
+class PlanStatusChanged(Event):
+    """Emitted when a plan's status changes — approval, automatic
+    completion, or cancellation.
+
+    Payload: `plan_id`, `project_id`, `from`, `to`.
+    """
+
+
+@dataclass(frozen=True)
 class TaskAdded(Event):
     """Emitted when a task is created.
 
@@ -46,6 +63,15 @@ class TaskStatusChanged(Event):
     approval, dispatch, review, retry, or cancellation.
 
     Payload: `task_id`, `project_id`, `from`, `to`.
+    """
+
+
+@dataclass(frozen=True)
+class TaskDependencyAdded(Event):
+    """Emitted when an existing task gains a new dependency — the plan
+    graph evolving as work is discovered.
+
+    Payload: `task_id`, `depends_on`, `project_id`.
     """
 
 
@@ -64,6 +90,18 @@ class SessionStatusChanged(Event):
     completion, failure, or abandonment.
 
     Payload: `session_id`, `task_id`, `from`, `to`.
+    """
+
+
+@dataclass(frozen=True)
+class AttentionRequired(Event):
+    """Emitted when execution has hit something only a human can
+    resolve: a session awaiting input, or a task whose automatic
+    retries are exhausted.
+
+    Payload: `kind` (`"session_awaiting_input"` or
+    `"task_retries_exhausted"`), the relevant `task_id` / `session_id`,
+    and `detail`.
     """
 
 

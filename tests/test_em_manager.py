@@ -248,3 +248,173 @@ def test_event_log_tells_the_whole_story(
         "AccountAdded",
         "ProjectAdded",
     ]
+
+
+def test_add_plan_and_list_plans(manager: EngineeringManager, tmp_path: Path) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+
+    plan = manager.add_plan("zenith", "Ship plugins", description="All of it")
+
+    assert manager.get_plan(plan.plan_id).goal == "Ship plugins"
+    assert [p.plan_id for p in manager.list_plans(project_id="zenith")] == [plan.plan_id]
+
+
+def test_add_task_into_plan_and_list_plan_tasks(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    plan = manager.add_plan("zenith", "Ship plugins")
+
+    task = manager.add_task("zenith", "Write the loader", plan_id=plan.plan_id)
+
+    assert [t.task_id for t in manager.plan_tasks(plan.plan_id)] == [task.task_id]
+
+
+def test_add_task_into_foreign_project_plan_raises(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_project("other", "Other", tmp_path)
+    plan = manager.add_plan("other", "Elsewhere")
+
+    with pytest.raises(DomainValidationError):
+        manager.add_task("zenith", "Misfiled", plan_id=plan.plan_id)
+
+
+def test_add_task_into_cancelled_plan_raises(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    plan = manager.add_plan("zenith", "Ship plugins")
+    manager.cancel_plan(plan.plan_id)
+
+    with pytest.raises(DomainValidationError):
+        manager.add_task("zenith", "Too late", plan_id=plan.plan_id)
+
+
+def test_approve_plan_readies_tasks_for_dispatch(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    plan = manager.add_plan("zenith", "Ship plugins")
+    task = manager.add_task("zenith", "Write the loader", plan_id=plan.plan_id)
+
+    assert manager.eligible_tasks() == []
+
+    manager.approve_plan(plan.plan_id)
+
+    assert [t.task_id for t in manager.eligible_tasks()] == [task.task_id]
+
+
+def test_accepting_last_task_completes_plan(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    from engineering_manager.domain.states import PlanStatus
+
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "personal")
+    plan = manager.add_plan("zenith", "Ship plugins")
+    task = manager.add_task("zenith", "Write the loader", plan_id=plan.plan_id)
+    manager.approve_plan(plan.plan_id)
+    session = manager.dispatch()
+    manager.complete_session(session.session_id, summary="done")
+
+    manager.accept_task(task.task_id)
+
+    assert manager.get_plan(plan.plan_id).status is PlanStatus.COMPLETED
+
+
+def test_cancelling_last_open_task_completes_plan(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    from engineering_manager.domain.states import PlanStatus
+
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "personal")
+    plan = manager.add_plan("zenith", "Ship plugins")
+    keep = manager.add_task("zenith", "Keep", plan_id=plan.plan_id)
+    drop = manager.add_task("zenith", "Drop", plan_id=plan.plan_id)
+    manager.approve_plan(plan.plan_id)
+    session = manager.dispatch(keep.task_id)
+    manager.complete_session(session.session_id)
+    manager.accept_task(keep.task_id)
+
+    manager.cancel_task(drop.task_id)
+
+    assert manager.get_plan(plan.plan_id).status is PlanStatus.COMPLETED
+
+
+def test_add_task_dependency_updates_graph(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    first = manager.add_task("zenith", "First")
+    second = manager.add_task("zenith", "Second")
+
+    manager.add_task_dependency(second.task_id, first.task_id)
+
+    assert manager.get_task(second.task_id).depends_on == frozenset({first.task_id})
+    assert [entry.name for entry in manager.list_events()][0] == "TaskDependencyAdded"
+
+
+def test_add_task_dependency_rejects_cycles(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    first = manager.add_task("zenith", "First")
+    second = manager.add_task("zenith", "Second", depends_on=[first.task_id])
+    third = manager.add_task("zenith", "Third", depends_on=[second.task_id])
+
+    with pytest.raises(DomainValidationError):
+        manager.add_task_dependency(first.task_id, third.task_id)
+    assert manager.get_task(first.task_id).depends_on == frozenset()
+
+
+def test_add_task_dependency_rejects_cancelled_dependency(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    first = manager.add_task("zenith", "First")
+    second = manager.add_task("zenith", "Second")
+    manager.cancel_task(first.task_id)
+
+    with pytest.raises(DomainValidationError):
+        manager.add_task_dependency(second.task_id, first.task_id)
+
+
+def test_add_task_dependency_rejects_cross_project_edge(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_project("other", "Other", tmp_path)
+    ours = manager.add_task("zenith", "Ours")
+    theirs = manager.add_task("other", "Theirs")
+
+    with pytest.raises(DomainValidationError):
+        manager.add_task_dependency(ours.task_id, theirs.task_id)
+
+
+def test_blocked_tasks_reports_doomed_dependents(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    dependency = manager.add_task("zenith", "Dependency")
+    dependent = manager.add_task("zenith", "Dependent", depends_on=[dependency.task_id])
+    manager.cancel_task(dependency.task_id)
+
+    (blockage,) = manager.blocked_tasks(project_id="zenith")
+
+    assert blockage.task_id == dependent.task_id
+    assert blockage.impossible == (dependency.task_id,)
+
+
+def test_tick_drives_work_end_to_end(manager: EngineeringManager, tmp_path: Path) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    task = manager.add_task("zenith", "Write the loader")
+    manager.approve_task(task.task_id)
+    manager.add_account("in-memory", "personal")
+
+    report = manager.tick()
+
+    assert len(report.sessions_started) == 1
+    assert manager.get_task(task.task_id).status is TaskStatus.IN_PROGRESS

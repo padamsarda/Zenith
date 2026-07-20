@@ -123,6 +123,12 @@ class Provider(ABC):
     def check_session(self, handle: SessionHandle) -> ProviderSessionStatus:
         """Report the current state of the session behind `handle`.
 
+        Raise only when the session is genuinely unknown or lost — the
+        execution engine treats a raise as "the work is gone" and fails
+        the session. Transient trouble reaching the session (a network
+        blip, a busy service) should be absorbed by the implementation,
+        not surfaced as an error.
+
         Raises:
             ProviderSessionError: If `handle` is unknown to this provider.
         """

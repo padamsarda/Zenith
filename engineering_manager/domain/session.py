@@ -7,7 +7,10 @@ from datetime import datetime
 from uuid import UUID
 
 from engineering_manager.domain.states import TERMINAL_SESSION_STATUSES, SessionStatus
-from engineering_manager.domain.validation import validate_session_status_transition
+from engineering_manager.domain.validation import (
+    validate_resume_at,
+    validate_session_status_transition,
+)
 from engineering_manager.exceptions import DomainValidationError
 from shared.utils.time_utils import utc_now
 from shared.utils.uuid_utils import generate_id
@@ -23,10 +26,17 @@ class Session:
     It may be updated via `update_external_ref` because resuming can
     yield a fresh provider-side reference.
 
+    `resume_at` is only meaningful while `INTERRUPTED`: it is the
+    moment the execution engine may resume the session automatically.
+    An interrupted session with no `resume_at` is waiting on a human
+    (for example, the provider reported `AWAITING_INPUT`) and is never
+    auto-resumed.
+
     Like `Command`, a `Session` is frozen and mutated only through
     validated methods: `transition_to` for `status`,
-    `update_external_ref` for the provider reference, and `close` to
-    stamp `ended_at`/`summary` once the session has reached a terminal
+    `update_external_ref` for the provider reference, `set_resume_at`
+    for the auto-resume moment, and `close` to stamp
+    `ended_at`/`summary` once the session has reached a terminal
     status. Construction does not validate; that happens at the
     framework boundary, in
     `engineering_manager.domain.validation.validate_session`.
@@ -39,6 +49,7 @@ class Session:
     model: str | None = None
     external_ref: str | None = None
     summary: str | None = None
+    resume_at: datetime | None = None
     session_id: UUID = field(default_factory=generate_id)
     started_at: datetime = field(default_factory=utc_now)
     ended_at: datetime | None = None
@@ -70,6 +81,20 @@ class Session:
                 f"Session {self.session_id} has ended; external_ref can no longer change."
             )
         object.__setattr__(self, "external_ref", external_ref)
+
+    def set_resume_at(self, resume_at: datetime | None) -> None:
+        """Set (or clear, with None) when this session may auto-resume.
+
+        Raises:
+            DomainValidationError: If `resume_at` is not a datetime or
+                None, or the session has already ended.
+        """
+        validate_resume_at(resume_at)
+        if self.ended_at is not None:
+            raise DomainValidationError(
+                f"Session {self.session_id} has ended; resume_at can no longer change."
+            )
+        object.__setattr__(self, "resume_at", resume_at)
 
     def close(self, summary: str | None = None) -> None:
         """Stamp `ended_at` (and optionally `summary`) on a finished session.

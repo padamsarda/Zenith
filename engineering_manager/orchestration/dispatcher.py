@@ -10,15 +10,21 @@ store's event log (for audit and history).
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from engineering_manager.domain.project import Project
 from engineering_manager.domain.session import Session
-from engineering_manager.domain.states import ProjectStatus, SessionStatus, TaskStatus
+from engineering_manager.domain.states import (
+    PlanStatus,
+    ProjectStatus,
+    SessionStatus,
+    TaskStatus,
+)
 from engineering_manager.domain.task import Task
 from engineering_manager.events import SessionStarted, SessionStatusChanged, TaskStatusChanged
 from engineering_manager.exceptions import OrchestrationError, ProviderSessionError
+from engineering_manager.orchestration.context import ContextAssembler
 from engineering_manager.orchestration.policy import AssignmentPolicy, FirstAvailablePolicy
 from engineering_manager.providers.base import SessionHandle, SessionSpec
 from engineering_manager.providers.registry import ProviderRegistry
@@ -56,12 +62,14 @@ class Dispatcher:
         providers: ProviderRegistry,
         *,
         policy: AssignmentPolicy | None = None,
+        context: ContextAssembler | None = None,
         bus: EventBus | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._store = store
         self._providers = providers
         self._policy = policy or FirstAvailablePolicy()
+        self._context = context or ContextAssembler(store)
         self._bus = bus or EventBus()
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
 
@@ -69,17 +77,24 @@ class Dispatcher:
         """Return dispatchable tasks, highest priority first.
 
         A task qualifies when it is `READY`, its project is `ACTIVE`,
-        and all of its dependencies are `DONE`. Ties in priority break
-        by creation time, oldest first.
+        its plan (if it belongs to one) is `IN_PROGRESS`, and all of its
+        dependencies are `DONE`. Ties in priority break by creation
+        time, oldest first.
         """
         active_projects = {
             project.project_id
             for project in self._store.list_projects(status=ProjectStatus.ACTIVE)
         }
+        approved_plans = {
+            plan.plan_id
+            for plan in self._store.list_plans(status=PlanStatus.IN_PROGRESS)
+        }
         candidates = [
             task
             for task in self._store.list_tasks(project_id=project_id, status=TaskStatus.READY)
-            if task.project_id in active_projects and self._dependencies_done(task)
+            if task.project_id in active_projects
+            and (task.plan_id is None or task.plan_id in approved_plans)
+            and self._dependencies_done(task)
         ]
         return sorted(candidates, key=lambda task: (-task.priority, task.created_at))
 
@@ -139,7 +154,7 @@ class Dispatcher:
             task=task,
             account_id=account.account_id,
             model=model,
-            instructions=instructions or self._default_instructions(task, project),
+            instructions=instructions or self._context.briefing(task, project),
             metadata=metadata or {},
         )
         handle = provider.start_session(spec)
@@ -207,10 +222,15 @@ class Dispatcher:
         self._logger.warning("Session %s failed: %s", session_id, reason or "(no reason)")
         return session
 
-    def interrupt_session(self, session_id: UUID) -> Session:
+    def interrupt_session(
+        self, session_id: UUID, resume_at: datetime | None = None
+    ) -> Session:
         """Record that a session was interrupted (e.g. a session limit).
 
         The task stays IN_PROGRESS — the work is paused, not lost.
+        `resume_at` is when the execution engine may resume the session
+        automatically; without one, the session waits for a human
+        (`resume_session`).
 
         Raises:
             SessionNotFoundError: If `session_id` is not in the store.
@@ -219,8 +239,13 @@ class Dispatcher:
         session = self._store.get_session(session_id)
         previous = session.status
         session.transition_to(SessionStatus.INTERRUPTED)
+        session.set_resume_at(resume_at)
         self._store.update_session(session)
-        self._logger.info("Session %s interrupted.", session_id)
+        self._logger.info(
+            "Session %s interrupted%s.",
+            session_id,
+            f"; may auto-resume at {resume_at.isoformat()}" if resume_at else "",
+        )
         self._publish_session_change(session, previous)
         return session
 
@@ -248,6 +273,7 @@ class Dispatcher:
         )
         session.transition_to(SessionStatus.ACTIVE)
         session.update_external_ref(handle.external_ref)
+        session.set_resume_at(None)
         self._store.update_session(session)
         self._logger.info("Session %s resumed as %s.", session_id, handle.external_ref)
         self._publish_session_change(session, previous)
@@ -298,13 +324,6 @@ class Dispatcher:
             self._store.get_task(dependency_id).status is TaskStatus.DONE
             for dependency_id in task.depends_on
         )
-
-    def _default_instructions(self, task: Task, project: Project) -> str:
-        """Compose the work description handed to the provider."""
-        lines = [f"Project: {project.name} ({project.root_path})", f"Task: {task.title}"]
-        if task.description:
-            lines.append(task.description)
-        return "\n\n".join(lines)
 
     def _end_session(
         self, session: Session, status: SessionStatus, summary: str | None

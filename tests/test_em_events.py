@@ -9,11 +9,15 @@ import pytest
 from engineering_manager.events import (
     AccountAdded,
     AccountRemoved,
+    AttentionRequired,
+    PlanAdded,
+    PlanStatusChanged,
     ProjectAdded,
     ProjectStatusChanged,
     SessionStarted,
     SessionStatusChanged,
     TaskAdded,
+    TaskDependencyAdded,
     TaskStatusChanged,
 )
 from shared.events.event import Event
@@ -21,10 +25,14 @@ from shared.events.event import Event
 ALL_EVENT_TYPES = (
     ProjectAdded,
     ProjectStatusChanged,
+    PlanAdded,
+    PlanStatusChanged,
     TaskAdded,
+    TaskDependencyAdded,
     TaskStatusChanged,
     SessionStarted,
     SessionStatusChanged,
+    AttentionRequired,
     AccountAdded,
     AccountRemoved,
 )

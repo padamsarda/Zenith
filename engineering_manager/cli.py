@@ -20,6 +20,7 @@ from uuid import UUID
 from engineering_manager.domain.states import TaskStatus
 from engineering_manager.exceptions import EngineeringManagerError
 from engineering_manager.manager import EngineeringManager
+from engineering_manager.orchestration.graph import execution_waves
 from engineering_manager.store.store import Store
 
 DEFAULT_DB_PATH = Path.home() / ".zenith" / "engineering_manager.db"
@@ -50,6 +51,23 @@ def build_parser() -> argparse.ArgumentParser:
     project_add.add_argument("--description")
     project_commands.add_parser("list", help="List managed projects.")
 
+    plan = commands.add_parser("plan", help="Manage plans (goal-level work).")
+    plan_commands = plan.add_subparsers(dest="subcommand", required=True)
+    plan_add = plan_commands.add_parser("add", help="Record a goal as a plan (in DRAFT).")
+    plan_add.add_argument("project_id")
+    plan_add.add_argument("goal")
+    plan_add.add_argument("--description")
+    plan_list = plan_commands.add_parser("list", help="List plans.")
+    plan_list.add_argument("--project")
+    plan_show = plan_commands.add_parser("show", help="Show a plan's task graph.")
+    plan_show.add_argument("plan_id", type=UUID)
+    for name, help_text in (
+        ("approve", "Approve a plan and its DRAFT tasks (gate one, in bulk)."),
+        ("cancel", "Cancel a plan and its non-terminal tasks."),
+    ):
+        subcommand = plan_commands.add_parser(name, help=help_text)
+        subcommand.add_argument("plan_id", type=UUID)
+
     task = commands.add_parser("task", help="Manage tasks.")
     task_commands = task.add_subparsers(dest="subcommand", required=True)
     task_add = task_commands.add_parser("add", help="Create a task (in DRAFT).")
@@ -57,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_add.add_argument("title")
     task_add.add_argument("--description")
     task_add.add_argument("--priority", type=int, default=0)
+    task_add.add_argument("--plan", type=UUID, help="The plan this task belongs to.")
     task_add.add_argument(
         "--depends-on",
         type=UUID,
@@ -68,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_list = task_commands.add_parser("list", help="List tasks.")
     task_list.add_argument("--project")
     task_list.add_argument("--status", choices=[status.name for status in TaskStatus])
+    task_depend = task_commands.add_parser(
+        "depend", help="Make an existing task depend on another."
+    )
+    task_depend.add_argument("task_id", type=UUID)
+    task_depend.add_argument("depends_on_id", type=UUID)
     for name, help_text in (
         ("approve", "Approve a DRAFT task for execution (gate one)."),
         ("accept", "Accept reviewed work as DONE (gate two)."),
@@ -114,6 +138,8 @@ def _run(manager: EngineeringManager, args: argparse.Namespace) -> None:
         print(f"Database ready at {args.db}.")
     elif args.command == "project":
         _run_project(manager, args)
+    elif args.command == "plan":
+        _run_plan(manager, args)
     elif args.command == "task":
         _run_task(manager, args)
     elif args.command == "account":
@@ -138,6 +164,36 @@ def _run_project(manager: EngineeringManager, args: argparse.Namespace) -> None:
             print(f"{project.project_id}  {project.status.name}  {project.name}")
 
 
+def _run_plan(manager: EngineeringManager, args: argparse.Namespace) -> None:
+    """Execute a `plan` subcommand."""
+    if args.subcommand == "add":
+        plan = manager.add_plan(args.project_id, args.goal, description=args.description)
+        print(f"Added plan {plan.plan_id} '{plan.goal}' (DRAFT).")
+    elif args.subcommand == "list":
+        for plan in manager.list_plans(project_id=args.project):
+            print(f"{plan.plan_id}  {plan.status.name:12}  {plan.goal}")
+    elif args.subcommand == "show":
+        _print_plan(manager, args.plan_id)
+    else:
+        action = {"approve": manager.approve_plan, "cancel": manager.cancel_plan}[
+            args.subcommand
+        ]
+        plan = action(args.plan_id)
+        print(f"Plan {plan.plan_id} is now {plan.status.name}.")
+
+
+def _print_plan(manager: EngineeringManager, plan_id: UUID) -> None:
+    """Print a plan's goal and its task graph as execution waves."""
+    plan = manager.get_plan(plan_id)
+    print(f"Plan {plan.plan_id} [{plan.status.name}]: {plan.goal}")
+    if plan.description:
+        print(f"  {plan.description}")
+    for number, wave in enumerate(execution_waves(manager.plan_tasks(plan_id)), start=1):
+        print(f"Wave {number} (may run in parallel):")
+        for task in wave:
+            print(f"  {task.task_id}  {task.status.name:12}  p{task.priority}  {task.title}")
+
+
 def _run_task(manager: EngineeringManager, args: argparse.Namespace) -> None:
     """Execute a `task` subcommand."""
     if args.subcommand == "add":
@@ -147,8 +203,12 @@ def _run_task(manager: EngineeringManager, args: argparse.Namespace) -> None:
             description=args.description,
             priority=args.priority,
             depends_on=args.depends_on,
+            plan_id=args.plan,
         )
         print(f"Added task {task.task_id} '{task.title}' (DRAFT).")
+    elif args.subcommand == "depend":
+        task = manager.add_task_dependency(args.task_id, args.depends_on_id)
+        print(f"Task {task.task_id} now depends on {args.depends_on_id}.")
     elif args.subcommand == "list":
         status = TaskStatus[args.status] if args.status else None
         for task in manager.list_tasks(project_id=args.project, status=status):

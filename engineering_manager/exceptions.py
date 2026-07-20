@@ -52,6 +52,10 @@ class ProjectNotFoundError(StoreError):
     """Raised when a project ID does not exist in the store."""
 
 
+class PlanNotFoundError(StoreError):
+    """Raised when a plan ID does not exist in the store."""
+
+
 class TaskNotFoundError(StoreError):
     """Raised when a task ID does not exist in the store."""
 

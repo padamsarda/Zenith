@@ -1,1 +1,1 @@
-"""Engineering Manager domain model: projects, tasks, sessions, accounts."""
+"""Engineering Manager domain model: projects, plans, tasks, sessions, accounts."""

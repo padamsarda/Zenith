@@ -17,6 +17,23 @@ class ProjectStatus(Enum):
     ARCHIVED = auto()
 
 
+class PlanStatus(Enum):
+    """Represents the lifecycle state of a Plan.
+
+    `DRAFT -> IN_PROGRESS -> COMPLETED`, with `CANCELLED` reachable from
+    any non-terminal state. `DRAFT -> IN_PROGRESS` is the bulk form of
+    human approval gate one: approving a plan approves its DRAFT tasks.
+    `COMPLETED` is reached automatically when every task in the plan is
+    terminal. `COMPLETED` and `CANCELLED` are terminal — see
+    `TERMINAL_PLAN_STATUSES`.
+    """
+
+    DRAFT = auto()
+    IN_PROGRESS = auto()
+    COMPLETED = auto()
+    CANCELLED = auto()
+
+
 class TaskStatus(Enum):
     """Represents the lifecycle state of a Task.
 
@@ -57,6 +74,10 @@ class SessionStatus(Enum):
 
 
 TERMINAL_PROJECT_STATUSES: frozenset[ProjectStatus] = frozenset({ProjectStatus.ARCHIVED})
+
+TERMINAL_PLAN_STATUSES: frozenset[PlanStatus] = frozenset(
+    {PlanStatus.COMPLETED, PlanStatus.CANCELLED}
+)
 
 TERMINAL_TASK_STATUSES: frozenset[TaskStatus] = frozenset(
     {TaskStatus.DONE, TaskStatus.CANCELLED}

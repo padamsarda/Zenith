@@ -17,13 +17,20 @@ from pathlib import Path
 from uuid import UUID
 
 from engineering_manager.domain.account import ProviderAccount
+from engineering_manager.domain.plan import Plan
 from engineering_manager.domain.project import Project
 from engineering_manager.domain.session import Session
-from engineering_manager.domain.states import ProjectStatus, SessionStatus, TaskStatus
+from engineering_manager.domain.states import (
+    PlanStatus,
+    ProjectStatus,
+    SessionStatus,
+    TaskStatus,
+)
 from engineering_manager.domain.task import Task
 from engineering_manager.exceptions import (
     AccountNotFoundError,
     DuplicateEntityError,
+    PlanNotFoundError,
     ProjectNotFoundError,
     SessionNotFoundError,
     StoreError,
@@ -36,6 +43,8 @@ from engineering_manager.store.serialization import (
     account_to_row,
     event_entry_from_row,
     event_to_row,
+    plan_from_row,
+    plan_to_row,
     project_from_row,
     project_to_row,
     session_from_row,
@@ -106,6 +115,59 @@ class Store:
             ).fetchall()
         return [project_from_row(row) for row in rows]
 
+    # -- plans -------------------------------------------------------------
+
+    def add_plan(self, plan: Plan) -> None:
+        """Insert `plan`.
+
+        Raises:
+            DuplicateEntityError: If the plan ID already exists.
+            StoreError: If the plan references a project not in the store.
+        """
+        self._insert("plans", plan_to_row(plan), entity="plan")
+
+    def update_plan(self, plan: Plan) -> None:
+        """Rewrite the stored row for `plan`.
+
+        Raises:
+            PlanNotFoundError: If the plan ID does not exist.
+        """
+        row = plan_to_row(plan)
+        updated = self._update("plans", row, key={"plan_id": row["plan_id"]})
+        if not updated:
+            raise PlanNotFoundError(f"Plan {plan.plan_id} is not in the store.")
+
+    def get_plan(self, plan_id: UUID) -> Plan:
+        """Return the plan with `plan_id`.
+
+        Raises:
+            PlanNotFoundError: If the plan ID does not exist.
+        """
+        row = self._connection.execute(
+            "SELECT * FROM plans WHERE plan_id = ?", (str(plan_id),)
+        ).fetchone()
+        if row is None:
+            raise PlanNotFoundError(f"Plan {plan_id} is not in the store.")
+        return plan_from_row(row)
+
+    def list_plans(
+        self, project_id: str | None = None, status: PlanStatus | None = None
+    ) -> list[Plan]:
+        """Return plans, optionally filtered, oldest first."""
+        clauses: list[str] = []
+        parameters: list[str] = []
+        if project_id is not None:
+            clauses.append("project_id = ?")
+            parameters.append(project_id)
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status.name)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._connection.execute(
+            f"SELECT * FROM plans{where} ORDER BY created_at", parameters
+        ).fetchall()
+        return [plan_from_row(row) for row in rows]
+
     # -- tasks -------------------------------------------------------------
 
     def add_task(self, task: Task) -> None:
@@ -142,7 +204,10 @@ class Store:
         return task_from_row(row)
 
     def list_tasks(
-        self, project_id: str | None = None, status: TaskStatus | None = None
+        self,
+        project_id: str | None = None,
+        status: TaskStatus | None = None,
+        plan_id: UUID | None = None,
     ) -> list[Task]:
         """Return tasks, optionally filtered, oldest first."""
         clauses: list[str] = []
@@ -153,6 +218,9 @@ class Store:
         if status is not None:
             clauses.append("status = ?")
             parameters.append(status.name)
+        if plan_id is not None:
+            clauses.append("plan_id = ?")
+            parameters.append(str(plan_id))
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._connection.execute(
             f"SELECT * FROM tasks{where} ORDER BY created_at", parameters

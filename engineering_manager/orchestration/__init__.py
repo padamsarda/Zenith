@@ -1,1 +1,4 @@
-"""Orchestration: choosing what runs where, and driving session lifecycles."""
+"""Orchestration: the execution engine and everything it decides with —
+plan coordination, dispatch, assignment, retries, context, and the
+dependency graph.
+"""

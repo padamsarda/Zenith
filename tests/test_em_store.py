@@ -8,14 +8,21 @@ from uuid import uuid4
 import pytest
 
 from engineering_manager.domain.account import ProviderAccount
+from engineering_manager.domain.plan import Plan
 from engineering_manager.domain.project import Project
 from engineering_manager.domain.session import Session
-from engineering_manager.domain.states import ProjectStatus, SessionStatus, TaskStatus
+from engineering_manager.domain.states import (
+    PlanStatus,
+    ProjectStatus,
+    SessionStatus,
+    TaskStatus,
+)
 from engineering_manager.domain.task import Task
 from engineering_manager.events import ProjectAdded, TaskAdded
 from engineering_manager.exceptions import (
     AccountNotFoundError,
     DuplicateEntityError,
+    PlanNotFoundError,
     ProjectNotFoundError,
     SessionNotFoundError,
     StoreError,
@@ -79,6 +86,83 @@ def test_list_projects_filters_by_status(store: Store, tmp_path: Path) -> None:
 
     assert store.list_projects() == [active, paused]
     assert store.list_projects(status=ProjectStatus.PAUSED) == [paused]
+
+
+def test_add_and_get_plan(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+    plan = Plan(project_id="zenith", goal="Ship plugins")
+
+    store.add_plan(plan)
+
+    assert store.get_plan(plan.plan_id) == plan
+
+
+def test_add_plan_for_missing_project_raises(store: Store) -> None:
+    with pytest.raises(StoreError):
+        store.add_plan(Plan(project_id="missing", goal="Ship plugins"))
+
+
+def test_add_duplicate_plan_raises(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+    plan = Plan(project_id="zenith", goal="Ship plugins")
+    store.add_plan(plan)
+
+    with pytest.raises(DuplicateEntityError):
+        store.add_plan(plan)
+
+
+def test_get_missing_plan_raises(store: Store) -> None:
+    with pytest.raises(PlanNotFoundError):
+        store.get_plan(uuid4())
+
+
+def test_update_plan_persists_status_change(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+    plan = Plan(project_id="zenith", goal="Ship plugins")
+    store.add_plan(plan)
+
+    plan.transition_to(PlanStatus.IN_PROGRESS)
+    store.update_plan(plan)
+
+    assert store.get_plan(plan.plan_id).status is PlanStatus.IN_PROGRESS
+
+
+def test_update_missing_plan_raises(store: Store) -> None:
+    with pytest.raises(PlanNotFoundError):
+        store.update_plan(Plan(project_id="zenith", goal="Ship plugins"))
+
+
+def test_list_plans_filters_by_project_and_status(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+    store.add_project(make_project(tmp_path, "other"))
+    draft = Plan(project_id="zenith", goal="First")
+    started = Plan(project_id="zenith", goal="Second", status=PlanStatus.IN_PROGRESS)
+    elsewhere = Plan(project_id="other", goal="Third")
+    for plan in (draft, started, elsewhere):
+        store.add_plan(plan)
+
+    assert store.list_plans() == [draft, started, elsewhere]
+    assert store.list_plans(project_id="zenith") == [draft, started]
+    assert store.list_plans(status=PlanStatus.IN_PROGRESS) == [started]
+
+
+def test_list_tasks_filters_by_plan(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+    plan = Plan(project_id="zenith", goal="Ship plugins")
+    store.add_plan(plan)
+    in_plan = Task(project_id="zenith", title="In plan", plan_id=plan.plan_id)
+    standalone = Task(project_id="zenith", title="Standalone")
+    store.add_task(in_plan)
+    store.add_task(standalone)
+
+    assert store.list_tasks(plan_id=plan.plan_id) == [in_plan]
+
+
+def test_add_task_with_missing_plan_raises(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+
+    with pytest.raises(StoreError):
+        store.add_task(Task(project_id="zenith", title="Orphan", plan_id=uuid4()))
 
 
 def test_add_and_get_task(store: Store, tmp_path: Path) -> None:

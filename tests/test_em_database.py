@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -50,7 +51,38 @@ def test_open_database_creates_expected_tables(tmp_path: Path) -> None:
     }
     connection.close()
 
-    assert {"projects", "tasks", "sessions", "accounts", "event_log"} <= names
+    assert {"projects", "plans", "tasks", "sessions", "accounts", "event_log"} <= names
+
+
+def test_version_one_database_upgrades_in_place(tmp_path: Path) -> None:
+    """A database created before the execution engine gains the new
+    schema — and keeps its data — the next time it is opened."""
+    path = tmp_path / "em.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(MIGRATIONS[0])
+    connection.execute("PRAGMA user_version = 1")
+    connection.execute(
+        "INSERT INTO projects (project_id, name, root_path, status, created_at) "
+        "VALUES ('zenith', 'Zenith', '.', 'ACTIVE', '2026-01-01T00:00:00+00:00')"
+    )
+    connection.commit()
+    connection.close()
+
+    upgraded = open_database(path)
+    version = upgraded.execute("PRAGMA user_version").fetchone()[0]
+    task_columns = {
+        row["name"] for row in upgraded.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    session_columns = {
+        row["name"] for row in upgraded.execute("PRAGMA table_info(sessions)").fetchall()
+    }
+    project = upgraded.execute("SELECT * FROM projects").fetchone()
+    upgraded.close()
+
+    assert version == SCHEMA_VERSION
+    assert "plan_id" in task_columns
+    assert "resume_at" in session_columns
+    assert project["project_id"] == "zenith"
 
 
 def test_open_database_enforces_foreign_keys(tmp_path: Path) -> None:

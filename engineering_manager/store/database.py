@@ -72,6 +72,26 @@ MIGRATIONS: tuple[str, ...] = (
     );
     CREATE INDEX idx_event_log_timestamp ON event_log(timestamp);
     """,
+    # Version 2 — the execution engine (ADRs 0008, 0009): plans as
+    # goal-level units of work, tasks tied to plans, and a per-session
+    # auto-resume moment for interrupted sessions.
+    """
+    CREATE TABLE plans (
+        plan_id     TEXT PRIMARY KEY,
+        project_id  TEXT NOT NULL REFERENCES projects(project_id),
+        goal        TEXT NOT NULL,
+        description TEXT,
+        status      TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+    );
+    CREATE INDEX idx_plans_project ON plans(project_id);
+    CREATE INDEX idx_plans_status ON plans(status);
+
+    ALTER TABLE tasks ADD COLUMN plan_id TEXT REFERENCES plans(plan_id);
+    CREATE INDEX idx_tasks_plan ON tasks(plan_id);
+
+    ALTER TABLE sessions ADD COLUMN resume_at TEXT;
+    """,
 )
 
 SCHEMA_VERSION = len(MIGRATIONS)
