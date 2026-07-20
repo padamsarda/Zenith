@@ -4,8 +4,11 @@ This repository hosts two applications built on one shared foundation:
 
 - **Zenith** (`runtime/`) — a runtime platform for building and
   operating an assistant called **Zeni**. It provides lifecycle
-  management, an event system, a command execution framework, and a
-  plugin framework. Assistant capabilities land on top of these.
+  management, an event system, a command execution framework, a plugin
+  framework, and the assistant runtime itself: conversations,
+  tool/skill capabilities, a provider-independent AI contract, and the
+  request pipeline every interface serves requests through. Assistant
+  capabilities land on top of these.
 - **Engineering Manager** (`engineering_manager/`) — a local-first
   platform for coordinating AI-performed engineering work across
   projects, providers (Claude, Gemini, Codex, …), and accounts. The
@@ -22,11 +25,14 @@ See [`docs/folder_structure.md`](docs/folder_structure.md) for the full
 listing. Summary:
 
 - **runtime/** — the Zenith assistant runtime: lifecycle, state,
-  service registry, command framework, plugin framework, and the
-  runtime's own event types.
+  service registry, command framework, plugin framework, the assistant
+  subsystem (`conversation/`, `capabilities/`, `providers/`,
+  `assistant/`), the console interface, and the runtime's own event
+  types.
 - **engineering_manager/** — the Engineering Manager: domain model
-  (projects, tasks, sessions, accounts), provider abstraction, SQLite
-  persistence with an event log, orchestration, and a CLI.
+  (projects, plans, tasks, sessions, accounts), provider abstraction,
+  SQLite persistence with an event log, the execution engine, and a
+  CLI.
 - **shared/** — infrastructure both applications use: base exceptions,
   the event system (`shared/events/`), and small utilities.
 - **configs/** — configuration loading for the Zenith runtime.
@@ -50,15 +56,34 @@ python main.py
 ```
 
 Prints a startup banner, verifies the project layout, loads
-configuration (defaults if `configs/config.toml` is absent), and idles
-until Ctrl+C shuts it down gracefully.
+configuration (defaults if `configs/config.toml` is absent), registers
+the built-in assistant provider, and idles until Ctrl+C shuts it down
+gracefully.
+
+For an interactive session, set `interactive = true` in
+`configs/config.toml`:
+
+```
+$ python main.py
+you> hello
+zenith> You said: hello
+you> exit
+```
+
+The built-in `EchoProvider` is scaffolding, not intelligence — it
+exists so the whole pipeline is exercisable before a real provider is
+integrated. Swapping in a real one is configuration
+(`assistant_provider`), not a code change. See
+[`docs/assistant.md`](docs/assistant.md).
 
 ## Running the Engineering Manager
 
 ```bash
 python -m engineering_manager project add zenith "Zenith" --path .
-python -m engineering_manager task add zenith "Implement plugin loading" --priority 5
-python -m engineering_manager task approve <task-id>
+python -m engineering_manager plan add zenith "Ship plugin support"
+python -m engineering_manager task add zenith "Implement plugin loading" --plan <plan-id> --priority 5
+python -m engineering_manager plan approve <plan-id>
+python -m engineering_manager plan show <plan-id>
 python -m engineering_manager status
 ```
 
@@ -81,6 +106,7 @@ architectural decisions are recorded in [`architecture/`](architecture/).
 ## Further reading
 
 - [`docs/architecture.md`](docs/architecture.md) — Zenith runtime internals.
+- [`docs/assistant.md`](docs/assistant.md) — the assistant runtime: conversations, capabilities, providers, and the request pipeline.
 - [`docs/engineering_manager.md`](docs/engineering_manager.md) — Engineering Manager architecture.
 - [`docs/events.md`](docs/events.md) — the shared event system.
 - [`docs/commands.md`](docs/commands.md) — the command execution framework.

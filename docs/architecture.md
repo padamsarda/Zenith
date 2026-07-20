@@ -11,7 +11,7 @@ and how control flows through startup and shutdown.
 main.py
   -> Runtime.run()
        -> Runtime.start()
-       -> idle loop
+       -> console session (config.interactive) or idle loop
        -> Runtime.stop()
 ```
 
@@ -32,6 +32,11 @@ shared resource a subsystem might need:
 - `events` — an `EventBus` (see `events.md`)
 - `commands` — a `CommandExecutor` (see `commands.md`)
 - `plugins` — a `PluginRegistry` (see `plugins.md`)
+- `conversations` — a `ConversationStore` (see `assistant.md`)
+- `tools` — a `ToolRegistry` (see `assistant.md`)
+- `skills` — a `SkillRegistry` (see `assistant.md`)
+- `assistant_providers` — an `AssistantProviderRegistry` (see `assistant.md`)
+- `assistant` — an `AssistantEngine` (see `assistant.md`)
 
 `Runtime` owns exactly one `ApplicationContext` instance
 (`Runtime.context`), created in `__init__`. Nothing in the codebase uses
@@ -66,7 +71,20 @@ everything else (`Config`, `Event`) is immutable.
 5. Verify the project's required top-level folders exist. On failure,
    emit `ApplicationStartupFailed`, set `state = FAILED`, and raise
    `ZenithRuntimeError`.
-6. `context.state = RUNNING`; emit `ApplicationStarted`.
+6. Initialize the assistant subsystem: register the built-in
+   `EchoProvider` so the request pipeline is servable. Real providers
+   are registered by plugins or startup integrations; the configured
+   default (`config.assistant_provider`) may name one that arrives
+   later, since resolution happens per request.
+7. `context.state = RUNNING`; emit `ApplicationStarted`.
+
+## Serving (`Runtime.run`)
+
+`run()` starts the runtime, serves until finished, and stops. With
+`config.interactive` set it serves a console session
+(`runtime.console.ConsoleInterface`) that ends at EOF or an exit word;
+otherwise it idles until interrupted. Ctrl+C triggers a graceful
+shutdown either way, and `stop()` always runs.
 
 ## Shutdown sequence (`Runtime.stop`)
 
@@ -81,13 +99,18 @@ everything else (`Config`, `Event`) is immutable.
 | `runtime/runtime.py` | Owns the lifecycle; the only module `main.py` depends on. |
 | `runtime/context.py` | `ApplicationContext` dataclass. |
 | `runtime/state.py` | `RuntimeState` enum. |
-| `runtime/exceptions.py` | Exception hierarchy for the runtime's own subsystems (service registry, event bus, commands, plugins). Rooted at `shared.exceptions.ZenithError`. |
+| `runtime/exceptions.py` | Exception hierarchy for the runtime's own subsystems (service registry, event bus, commands, plugins, conversations, capabilities, assistant). Rooted at `shared.exceptions.ZenithError`. |
+| `runtime/console.py` | `ConsoleInterface`: the interactive text session. See `assistant.md`. |
 | `runtime/logging_setup.py` | Console logging configuration. |
 | `runtime/registry.py` | `ServiceRegistry`. |
 | `runtime/validation.py` | Guard functions used at system boundaries. |
 | `runtime/events/` | Concrete runtime lifecycle events. The event system itself (`Event`, `EventBus`, `EventLogger`) lives in `shared/events/` — see `events.md`. |
 | `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
 | `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, and concrete plugin events. See `plugins.md`. |
+| `runtime/conversation/` | `Message`, `Conversation`, `ConversationState`, `ConversationStore`, and concrete conversation events. See `assistant.md`. |
+| `runtime/capabilities/` | `Tool`, `Skill`, their registries, the `CapabilityCatalog`, and concrete capability events. See `assistant.md`. |
+| `runtime/providers/` | `AssistantProvider`, `TurnBrief`, `AssistantTurn`, `ToolCall`, `AssistantProviderRegistry`, and the built-in `EchoProvider` / `ScriptedProvider`. See `assistant.md`. |
+| `runtime/assistant/` | `AssistantRequest`, `AssistantResponse`, `AssistantEngine`, `ToolCallRunner`, `AssistantContextAssembler`, `PermissionPolicy`, `AssistantHook`, and concrete assistant events. See `assistant.md`. |
 | `shared/exceptions.py` | Generic exception hierarchy (`ZenithError` and a handful of domain-agnostic subclasses, including `EventBusError`) with no dependency on a specific runtime subsystem. |
 | `shared/events/` | The event system: `Event`, `EventBus`, `EventLogger`. |
 | `shared/utils/` | Small, reusable helpers (time, UUID, filesystem, text) with no dependency on `runtime/`. |
@@ -111,8 +134,14 @@ shared.exceptions, shared.utils
         -> registry, runtime.events.lifecycle_events
           -> commands (status -> validation -> command -> context, events -> executor)
           -> plugins (state -> validation -> manifest, plugin -> context, events -> registry)
-            -> context
-              -> runtime
+          -> conversation (message, state -> validation -> conversation, events -> store)
+          -> capabilities (tool, skill -> validation, catalog, events -> registries)
+            -> providers (base -> registry, echo, scripted)
+              -> assistant (status, request, response -> validation
+                            -> permissions, hooks, assembler, tool_runner -> engine)
+                -> context
+                  -> console
+                    -> runtime
 ```
 
 `runtime/commands/context.py`, `runtime/commands/executor.py`,
@@ -126,6 +155,15 @@ other direction would be circular. `runtime/plugins/context.py` and
 `runtime.plugins.registry.PluginRegistry` only under `TYPE_CHECKING`,
 since `registry.py` imports `context.py` for real (to construct
 `PluginContext`).
+
+Every module under `runtime/conversation/`, `runtime/capabilities/`,
+and `runtime/assistant/` that needs the `ApplicationContext` follows
+the same rule, for the same reason: `runtime.context` imports
+`ConversationStore`, both capability registries,
+`AssistantProviderRegistry`, and `AssistantEngine` at runtime to build
+its fields. `runtime/capabilities/skill.py` likewise refers to
+`AssistantRequest` only under `TYPE_CHECKING`, since the assistant
+package imports the capability package for real.
 
 No module imports anything "above" it in this chain, so there are no
 circular imports. `runtime/__init__.py` and `configs/__init__.py`

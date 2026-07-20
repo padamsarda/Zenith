@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from configs.config import Config, load_config
+from runtime.console import ConsoleInterface
 from runtime.context import ApplicationContext
 from runtime.events.lifecycle_events import (
     ApplicationStarted,
@@ -19,6 +20,7 @@ from runtime.events.lifecycle_events import (
 )
 from shared.exceptions import ConfigurationError, ZenithRuntimeError
 from runtime.logging_setup import configure_logging
+from runtime.providers.echo import EchoProvider
 from runtime.state import RuntimeState
 from shared.utils.fs_utils import directory_exists
 from runtime.validation import validate_config, validate_path_exists
@@ -106,19 +108,27 @@ class Runtime:
             )
             raise
 
+        self._initialize_assistant()
+
         self.context.state = RuntimeState.RUNNING
         self.context.logger.info("Zenith runtime started.")
         print("Zenith Runtime Started")
         self.context.events.emit(ApplicationStarted(source=SOURCE))
 
     def run(self) -> None:
-        """Start the runtime and idle until interrupted, then stop.
+        """Start the runtime, serve until finished, then stop.
 
-        Ctrl+C during the idle loop triggers a graceful shutdown.
+        With `config.interactive` set, serves a console session
+        (`runtime.console.ConsoleInterface`) that ends at EOF or an
+        exit word; otherwise idles until interrupted. Ctrl+C triggers a
+        graceful shutdown either way.
         """
         try:
             self.start()
-            self._idle()
+            if self.context.config.interactive:
+                ConsoleInterface().run(self.context)
+            else:
+                self._idle()
         except KeyboardInterrupt:
             self.context.logger.info("Shutdown signal received.")
         finally:
@@ -159,6 +169,22 @@ class Runtime:
         self.context.config = config
         self.context.events.emit(
             ConfigurationLoaded(source=SOURCE, payload={"debug": config.debug})
+        )
+
+    def _initialize_assistant(self) -> None:
+        """Make the assistant subsystem servable: register built-in providers.
+
+        Only the built-in `EchoProvider` is registered here; real
+        providers are registered by plugins or startup integrations.
+        The configured default (`config.assistant_provider`) may
+        legitimately name a provider that arrives later — resolution
+        happens per request, not here.
+        """
+        if not self.context.assistant_providers.has("echo"):
+            self.context.assistant_providers.register(EchoProvider())
+        self.context.logger.info(
+            "Assistant subsystem ready (default provider: %s).",
+            self.context.config.assistant_provider,
         )
 
     def _idle(self) -> None:

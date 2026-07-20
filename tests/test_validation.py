@@ -62,3 +62,28 @@ def test_validate_config_passes_for_config_instance() -> None:
 def test_validate_config_rejects_non_config() -> None:
     with pytest.raises(ValidationError):
         validate_config({"debug": True})  # type: ignore[arg-type]
+
+
+def test_validate_config_rejects_non_bool_debug() -> None:
+    with pytest.raises(ValidationError):
+        validate_config(Config(debug="yes"))  # type: ignore[arg-type]
+
+
+def test_validate_config_rejects_non_bool_interactive() -> None:
+    with pytest.raises(ValidationError):
+        validate_config(Config(interactive=1))  # type: ignore[arg-type]
+
+
+def test_validate_config_rejects_blank_assistant_provider() -> None:
+    with pytest.raises(ValidationError):
+        validate_config(Config(assistant_provider="  "))
+
+
+def test_validate_config_rejects_non_positive_max_turns() -> None:
+    with pytest.raises(ValidationError):
+        validate_config(Config(assistant_max_turns=0))
+
+
+def test_validate_config_rejects_non_int_max_turns() -> None:
+    with pytest.raises(ValidationError):
+        validate_config(Config(assistant_max_turns="8"))  # type: ignore[arg-type]

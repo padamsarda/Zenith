@@ -43,8 +43,24 @@ def validate_service_name(name: str) -> None:
 
 
 def validate_config(config: Config) -> None:
-    """Raise ValidationError if `config` is not a valid Config instance."""
+    """Raise ValidationError if `config` is not a usable Config instance.
+
+    Checks the instance's type and every field's type and range, so a
+    successful call means the whole configuration is safe to run on.
+    """
     if not isinstance(config, Config):
         raise ValidationError(
             f"Expected a Config instance, got {type(config).__name__}"
+        )
+    if not isinstance(config.debug, bool):
+        raise ValidationError(f"debug must be a bool, got {config.debug!r}")
+    if not isinstance(config.interactive, bool):
+        raise ValidationError(f"interactive must be a bool, got {config.interactive!r}")
+    if is_blank_or_padded(config.assistant_provider):
+        raise ValidationError(
+            f"assistant_provider must be a provider ID, got {config.assistant_provider!r}"
+        )
+    if not isinstance(config.assistant_max_turns, int) or config.assistant_max_turns < 1:
+        raise ValidationError(
+            f"assistant_max_turns must be a positive integer, got {config.assistant_max_turns!r}"
         )

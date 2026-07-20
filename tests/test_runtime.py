@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
+
+from runtime.assistant.request import AssistantRequest
 
 from shared.events.event import Event
 from runtime.events.lifecycle_events import (
@@ -197,3 +200,46 @@ def test_runtime_start_survives_failing_listener() -> None:
 
     assert runtime.state is RuntimeState.RUNNING
     runtime.stop()
+
+
+def test_runtime_start_registers_the_echo_provider() -> None:
+    runtime = Runtime(base_path=PROJECT_ROOT)
+
+    runtime.start()
+
+    assert runtime.context.assistant_providers.has("echo")
+    runtime.stop()
+
+
+def test_runtime_start_can_serve_a_request_end_to_end() -> None:
+    runtime = Runtime(base_path=PROJECT_ROOT)
+    runtime.start()
+    conversation = runtime.context.conversations.create(runtime.context)
+    request = AssistantRequest(
+        conversation_id=conversation.conversation_id, text="ping"
+    )
+
+    response = runtime.context.assistant.handle(request, runtime.context)
+
+    assert response.success is True
+    assert response.text == "You said: ping"
+    runtime.stop()
+
+
+def test_runtime_run_interactive_serves_a_console_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for folder in ("runtime", "plugins", "configs", "architecture", "docs", "tests"):
+        (tmp_path / folder).mkdir()
+    (tmp_path / "configs" / "config.toml").write_text("interactive = true\n")
+    runtime = Runtime(base_path=tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("hello\nexit\n"))
+
+    runtime.run()
+
+    assert runtime.state is RuntimeState.STOPPED
+    (conversation,) = runtime.context.conversations.list()
+    assert [message.content for message in conversation.messages] == [
+        "hello",
+        "You said: hello",
+    ]

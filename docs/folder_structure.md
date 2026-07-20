@@ -13,6 +13,7 @@ runtime/                       The Zenith assistant runtime.
     logging_setup.py            Console logging configuration.
     registry.py                 ServiceRegistry.
     validation.py               Validation guard functions.
+    console.py                  ConsoleInterface: interactive text session.
     events/
         lifecycle_events.py      Concrete runtime lifecycle events. (The event
                                   system itself lives in shared/events/.)
@@ -32,6 +33,38 @@ runtime/                       The Zenith assistant runtime.
         context.py               PluginContext.
         events.py                Concrete plugin lifecycle events.
         registry.py              PluginRegistry.
+    conversation/
+        message.py               Message, MessageRole.
+        state.py                 ConversationState enum, TERMINAL_STATES.
+        validation.py            Conversation validation guard functions.
+        conversation.py          Conversation (append-only message history).
+        events.py                Concrete conversation events.
+        store.py                 ConversationStore.
+    capabilities/
+        tool.py                  Tool (ABC), ToolParameter.
+        skill.py                 Skill (ABC).
+        validation.py            Capability validation guard functions.
+        events.py                Concrete capability registry events.
+        tool_registry.py         ToolRegistry.
+        skill_registry.py        SkillRegistry.
+        catalog.py               CapabilityCatalog, CapabilityDescriptor, build_catalog.
+    providers/
+        base.py                  AssistantProvider ABC, TurnBrief,
+                                  AssistantTurn, ToolCall.
+        registry.py              AssistantProviderRegistry.
+        echo.py                  EchoProvider (built-in default).
+        scripted.py              ScriptedProvider (reference implementation).
+    assistant/
+        status.py                RequestStatus enum, TERMINAL_STATUSES.
+        validation.py            Request and turn guard functions.
+        request.py               AssistantRequest.
+        response.py              AssistantResponse.
+        events.py                Concrete assistant pipeline events.
+        permissions.py           PermissionPolicy ABC, AllowAllPolicy.
+        hooks.py                 AssistantHook.
+        assembler.py             AssistantContextAssembler: composes TurnBriefs.
+        tool_runner.py           ToolCallRunner: executes one tool call.
+        engine.py                AssistantEngine: the request pipeline.
 
 engineering_manager/           The Engineering Manager application.
     __init__.py                 Package docstring only.
@@ -41,9 +74,11 @@ engineering_manager/           The Engineering Manager application.
     events.py                   Concrete Engineering Manager events.
     exceptions.py               EM exception hierarchy (rooted at ZenithError).
     domain/
-        states.py                ProjectStatus, TaskStatus, SessionStatus + terminals.
+        states.py                ProjectStatus, PlanStatus, TaskStatus,
+                                  SessionStatus + terminals.
         validation.py            Structural and transition guard functions.
         project.py               Project.
+        plan.py                  Plan.
         task.py                  Task.
         session.py               Session.
         account.py               ProviderAccount.
@@ -58,7 +93,12 @@ engineering_manager/           The Engineering Manager application.
         store.py                 Store: strict CRUD + append-only event log.
     orchestration/
         policy.py                AssignmentPolicy ABC, FirstAvailablePolicy.
+        retry.py                 RetryPolicy ABC, LimitedRetryPolicy.
+        graph.py                 Dependency-graph analysis: cycles, waves, blockages.
+        context.py               ContextAssembler: composes session briefs.
+        plans.py                 PlanCoordinator: plan lifecycle operations.
         dispatcher.py            Dispatcher: eligibility, dispatch, session lifecycle.
+        engine.py                ExecutionEngine: the reconcile-and-advance tick.
 
 configs/                       Configuration loading for the Zenith runtime.
     config.py                   Config dataclass and TOML loader.

@@ -6,8 +6,13 @@ import logging
 from datetime import datetime, timezone
 
 from configs.config import Config
+from runtime.assistant.engine import AssistantEngine
+from runtime.capabilities.skill_registry import SkillRegistry
+from runtime.capabilities.tool_registry import ToolRegistry
 from runtime.commands.executor import CommandExecutor
 from runtime.context import ApplicationContext
+from runtime.conversation.store import ConversationStore
+from runtime.providers.registry import AssistantProviderRegistry
 from shared.events.bus import EventBus
 from shared.events.event import Event
 from runtime.plugins.registry import PluginRegistry
@@ -116,3 +121,39 @@ def test_context_config_can_be_replaced() -> None:
     context.config = new_config
 
     assert context.config is new_config
+
+
+def test_context_owns_a_conversation_store() -> None:
+    context = make_context()
+
+    assert isinstance(context.conversations, ConversationStore)
+
+
+def test_context_owns_capability_registries() -> None:
+    context = make_context()
+
+    assert isinstance(context.tools, ToolRegistry)
+    assert isinstance(context.skills, SkillRegistry)
+
+
+def test_context_owns_an_assistant_provider_registry() -> None:
+    context = make_context()
+
+    assert isinstance(context.assistant_providers, AssistantProviderRegistry)
+
+
+def test_context_owns_an_assistant_engine() -> None:
+    context = make_context()
+
+    assert isinstance(context.assistant, AssistantEngine)
+
+
+def test_two_contexts_have_independent_assistant_subsystems() -> None:
+    first = make_context()
+    second = make_context()
+
+    assert first.conversations is not second.conversations
+    assert first.tools is not second.tools
+    assert first.skills is not second.skills
+    assert first.assistant_providers is not second.assistant_providers
+    assert first.assistant is not second.assistant
