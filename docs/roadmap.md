@@ -287,7 +287,7 @@ music," "increase volume," "open VS Code"). Neither is auto-registered,
 following the ADR 0016 precedent exactly.
 
 Closing/switching applications and listing what is running shipped in
-item 11 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
+item 12 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
 display management (named in the product vision, not built — different
 mechanisms again, not a natural extension of either desktop tool), and
 an absolute volume level (needs the Windows Core Audio COM API, which
@@ -390,7 +390,27 @@ scheduler (ADR 0007); a deployment that never restarts never reflects
 deeply. And nothing yet links reflections to each other or to derived
 semantic memories.
 
-### 11. App control: list, switch, close — shipped
+### 11. File search across the user's documents — shipped
+
+`FileSearchTool` (`file_search`, ADR 0030) answers the vision's "search
+my notes for MPPT" and "find the latest datasheet", which nothing could:
+`FilesystemTool` is sandboxed to one root, and `main.py` gives it
+`Path.cwd()`, so Zeni could only see the folder it was started from.
+Searches home/Desktop/Documents/Downloads/OneDrive by name, content, or
+recency, pruning `node_modules`/`.git`/`AppData` and bounding the walk.
+
+**Read-only by construction**, which is what makes spanning several
+roots acceptable, and why it is a separate tool rather than a widened
+`FilesystemTool` — broad reach and mutation are each fine alone and
+dangerous together.
+
+Still open: nothing yet *acts* on what is found. "Move these files",
+"rename this folder", and "open my CubeSat workspace" need either
+`FilesystemTool` pointed at the right root or a new tool, and doing that
+properly means deciding how a destination root gets authorized rather
+than just widening a sandbox.
+
+### 12. App control: list, switch, close — shipped
 
 `AppControlTool` (`app_control`, `runtime/tools/app_control.py`, ADR
 0026) is `AppLauncherTool`'s complement: `list` (every visible window's

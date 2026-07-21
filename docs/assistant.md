@@ -174,6 +174,7 @@ root(s) its deployment allows and registers it explicitly.
 | Tool | `tool_id` | What it does |
 |---|---|---|
 | `FilesystemTool` | `filesystem` | `read`/`write`/`list`/`mkdir`/`delete`/`exists`, sandboxed to a root directory. |
+| `FileSearchTool` | `file_search` | Finds files by name, content, or recency across several roots. Read-only (ADR 0030). |
 | `ShellTool` | `shell` | Runs one shell command line with configurable `cwd` (sandboxed), `env`, and `timeout_seconds`. |
 | `GitTool` | `git` | `status`/`diff`/`add`/`commit`/`branch`/`checkout`/`log`/`reset` (mixed mode only) against a repository. No `push`, `pull`, `clone`, or `--hard`. |
 | `DiffTool` | `diff` | A unified diff (`difflib`) between two inline texts or two sandboxed files. |
@@ -193,6 +194,14 @@ checks. `ShellTool`, `GitTool`, and `TestRunnerTool` shell out through
 `CommandContext.cancellation_token` — raising `CommandCancelledError` if
 it is set — the reserved seam `docs/commands.md` describes, now with its
 first real user.
+
+`FileSearchTool` (ADR 0030) spans several roots rather than one, because
+"where is that datasheet" is not a question about a single project. It
+is **read-only by construction** — no operation writes, moves, or
+deletes — which is what makes that reach acceptable, and why it needs no
+confirmation gate while `filesystem`'s `write`/`delete` do. Broad reach
+and mutation are each fine alone and dangerous together, which is why
+they are two tools rather than one widened one.
 
 `AppLauncherTool`, `AppControlTool`, and `MediaControlTool` (ADR 0024,
 ADR 0026) are not sandboxed to a root — there is nothing to sandbox an

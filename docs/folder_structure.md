@@ -108,6 +108,8 @@ runtime/                       The Zenith assistant runtime.
         process.py               run_process: shared subprocess harness.
         arguments.py             Argument-extraction helpers for Tool.invoke.
         filesystem.py            FilesystemTool.
+        file_search.py           FileSearchTool: read-only search across several
+                                   document roots (ADR 0030).
         shell.py                 ShellTool.
         git.py                   GitTool.
         diff.py                  DiffTool.

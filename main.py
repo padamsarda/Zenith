@@ -28,6 +28,7 @@ from runtime.runtime import Runtime
 from runtime.tools.app_control import AppControlTool
 from runtime.tools.app_launcher import AppLauncherTool
 from runtime.tools.diff import DiffTool
+from runtime.tools.file_search import FileSearchTool
 from runtime.tools.filesystem import FilesystemTool
 from runtime.tools.git import GitTool
 from runtime.tools.media_control import MediaControlTool
@@ -57,6 +58,7 @@ REFLECTION_DB_PATH = STATE_DIR / "reflections.db"
 # can never drift from what was actually registered.
 TOOL_IDS = (
     "filesystem",
+    "file_search",
     "shell",
     "git",
     "diff",
@@ -142,6 +144,10 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
     reflection_service = _wire_reflection(context, provider)
 
     context.tools.register(FilesystemTool(workspace), context)
+    # Read-only, and deliberately *not* confined to the workspace:
+    # "where is that datasheet" spans the folders a person keeps work in,
+    # not whichever directory Zeni was started from (ADR 0030).
+    context.tools.register(FileSearchTool(), context)
     context.tools.register(ShellTool(workspace), context)
     context.tools.register(GitTool(workspace), context)
     context.tools.register(DiffTool(workspace), context)
