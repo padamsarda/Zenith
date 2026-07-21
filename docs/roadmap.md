@@ -286,10 +286,12 @@ direction's own daily-interaction examples ("open Spotify," "pause the
 music," "increase volume," "open VS Code"). Neither is auto-registered,
 following the ADR 0016 precedent exactly.
 
-Still open: closing/switching applications, listing what is running,
-Bluetooth, and display management (all named in the product vision, none
-built — see ADR 0024's consequences), and an absolute volume level
-(needs the Windows Core Audio COM API, which has no stdlib binding).
+Closing/switching applications and listing what is running shipped in
+item 8 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
+display management (named in the product vision, not built — different
+mechanisms again, not a natural extension of either desktop tool), and
+an absolute volume level (needs the Windows Core Audio COM API, which
+has no stdlib binding).
 
 ### 7. A real, runnable Zeni — shipped
 
@@ -311,6 +313,17 @@ which only the console interface has — a future voice/GUI/network
 interface needs its own. A configurable workspace root (today, always
 `Path.cwd()`) is the natural next knob if daily use shows the current
 working directory isn't the right default.
+
+### 8. App control: list, switch, close — shipped
+
+`AppControlTool` (`app_control`, `runtime/tools/app_control.py`, ADR
+0026) is `AppLauncherTool`'s complement: `list` (every visible window's
+title), `switch` (focus a window by name), `close` (force-terminate a
+running application by name, via `taskkill`). `close` is the one call in
+the entire desktop-control suite that can lose data — it joins `shell`
+and `filesystem`'s `write`/`delete` behind `ConfirmationHook` (ADR
+0025); `list`/`switch` stay unconfirmed. Registered in `main.py`'s
+`_wire_zeni` alongside the rest of the suite.
 
 ## Repository-wide
 

@@ -79,6 +79,7 @@ runtime/                       The Zenith assistant runtime.
         diff.py                  DiffTool.
         test_runner.py           TestRunnerTool.
         app_launcher.py          AppLauncherTool: opens an app/file/URL by name (ADR 0024).
+        app_control.py           AppControlTool: list/switch/close running apps (ADR 0026).
         media_control.py         MediaControlTool: play/pause/skip/mute/volume (ADR 0024).
     assistant/
         status.py                RequestStatus enum, TERMINAL_STATUSES.

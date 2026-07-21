@@ -179,6 +179,7 @@ root(s) its deployment allows and registers it explicitly.
 | `DiffTool` | `diff` | A unified diff (`difflib`) between two inline texts or two sandboxed files. |
 | `TestRunnerTool` | `test_runner` | Runs the test suite (`python -m pytest` by default) and reports the exit code, captured output, and best-effort pass/fail counts. |
 | `AppLauncherTool` | `app_launcher` | Opens an application, file, or URL by everyday name (ADR 0024). |
+| `AppControlTool` | `app_control` | Lists open windows, switches to one, or closes a running application (ADR 0026). |
 | `MediaControlTool` | `media_control` | Play/pause, skip, mute, and relative volume, by simulating hardware media keys (ADR 0024). |
 
 `FilesystemTool`, `ShellTool` (`cwd`), `GitTool` (path arguments), and
@@ -191,14 +192,20 @@ checks. `ShellTool`, `GitTool`, and `TestRunnerTool` shell out through
 it is set — the reserved seam `docs/commands.md` describes, now with its
 first real user.
 
-`AppLauncherTool` and `MediaControlTool` (ADR 0024) are not sandboxed to
-a root — there is nothing to sandbox an "open this application" or
-"press this key" call to. Their boundary is the `PermissionPolicy`
-alone, so a `ToolAllowlistPolicy` matters even more for these two than
-for the rest of the suite. Both take an injectable side-effecting
-callable (`Launcher`, `KeySender`) so tests never launch a real process
-or send a real key press; the real Windows-backed defaults are exercised
-in practice, not in the cross-platform CI matrix.
+`AppLauncherTool`, `AppControlTool`, and `MediaControlTool` (ADR 0024,
+ADR 0026) are not sandboxed to a root — there is nothing to sandbox an
+"open this application," "list open windows," or "press this key" call
+to. Their boundary is the `PermissionPolicy` alone, so a
+`ToolAllowlistPolicy` matters even more for these three than for the
+rest of the suite. All three take an injectable side-effecting callable
+(`Launcher`, `WindowLister`/`WindowActivator`/`ProcessCloser`,
+`KeySender`) so tests never launch a real process, enumerate real
+windows, or send a real key press; the real Windows-backed defaults are
+exercised in practice, not in the cross-platform CI matrix.
+`AppControlTool.close` is the one call in this trio that can lose data
+(it force-terminates a process), so it — alone among this whole
+desktop-control suite — goes through `ConfirmationHook` like `shell` and
+`filesystem`'s destructive operations do.
 
 Registering one:
 
@@ -443,10 +450,12 @@ gives for the policy.
 is the per-tool user confirmation the previous version of this
 paragraph called unbuilt: a `before_tool` hook that asks for explicit
 approval before a call that could destroy something irrecoverably runs
-— any `shell` call, and `filesystem`'s `write`/`delete` operations.
-Declining raises `ToolCallVetoedError`, recorded as a denial like any
-other. Everything else is unaffected, including `AppLauncherTool`/
-`MediaControlTool` (ADR 0024), since none of it can lose data.
+— any `shell` call, `filesystem`'s `write`/`delete` operations, and
+`app_control`'s `close` (ADR 0026). Declining raises
+`ToolCallVetoedError`, recorded as a denial like any other. Everything
+else is unaffected, including `AppLauncherTool`, `app_control`'s own
+`list`/`switch`, and `MediaControlTool` (ADR 0024), since none of it can
+lose data.
 
 ```python
 context.assistant.add_hook(ConfirmationHook())

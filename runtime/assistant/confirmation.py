@@ -21,8 +21,12 @@ DEFAULT_LOGGER_NAME = "zenith.assistant.confirmation"
 # gameable, so every call is gated. `filesystem`'s read-only operations
 # (read/list/mkdir/exists) cannot destroy anything already there, so only
 # `write` (can overwrite existing content) and `delete` need a checkpoint.
+# `app_control`'s `close` (ADR 0024's follow-up) force-terminates a
+# process and can lose unsaved work the same way `filesystem.delete`
+# loses a file; `list`/`switch` are read-only/reversible and stay clear.
 _ALWAYS_GATED_TOOL_IDS = frozenset({"shell"})
 _GATED_FILESYSTEM_OPERATIONS = frozenset({"write", "delete"})
+_GATED_APP_CONTROL_OPERATIONS = frozenset({"close"})
 
 Confirmer = Callable[[str], bool]
 
@@ -46,9 +50,10 @@ class ConfirmationHook(AssistantHook):
     may run *at all* for a deployment; this decides whether *this
     particular call* may proceed right now, for the subset of calls that
     can destroy something irrecoverably (`shell`'s arbitrary commands,
-    `filesystem`'s `write`/`delete`). Everything else — including
-    `AppLauncherTool` and `MediaControlTool`, ADR 0024 — is unaffected,
-    since opening an app or pressing a media key cannot lose data.
+    `filesystem`'s `write`/`delete`, `app_control`'s `close`). Everything
+    else — including `AppLauncherTool`, and `app_control`'s own
+    `list`/`switch`, and `MediaControlTool`, ADR 0024 — is unaffected,
+    since none of those can lose data.
 
     Declining raises `ToolCallVetoedError`, which `ToolCallRunner`
     records as a denial the provider sees on its next turn — the request
@@ -104,5 +109,11 @@ class ConfirmationHook(AssistantHook):
             if operation in _GATED_FILESYSTEM_OPERATIONS:
                 path = call.arguments.get("path", "")
                 return f"{operation} filesystem path {path!r}"
+
+        if call.tool_id == "app_control":
+            operation = call.arguments.get("operation")
+            if operation in _GATED_APP_CONTROL_OPERATIONS:
+                app_name = call.arguments.get("app_name", "")
+                return f"close application {app_name!r}"
 
         return None

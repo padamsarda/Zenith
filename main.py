@@ -18,6 +18,7 @@ from runtime.assistant.confirmation import ConfirmationHook
 from runtime.assistant.permissions import ToolAllowlistPolicy
 from runtime.providers.claude import API_KEY_ENV_VAR, ClaudeProvider
 from runtime.runtime import Runtime
+from runtime.tools.app_control import AppControlTool
 from runtime.tools.app_launcher import AppLauncherTool
 from runtime.tools.diff import DiffTool
 from runtime.tools.filesystem import FilesystemTool
@@ -38,6 +39,7 @@ TOOL_IDS = (
     "diff",
     "test_runner",
     "app_launcher",
+    "app_control",
     "media_control",
 )
 
@@ -50,10 +52,11 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
     only makes it available, the same "configuration, not a code change"
     contract every other provider swap already follows (`README.md`).
 
-    `ShellTool`'s commands and `FilesystemTool`'s `write`/`delete` go
-    through `ConfirmationHook` (ADR 0025), which asks on the console
-    before each one runs; everything else in the suite, including the
-    desktop-control tools (ADR 0024), runs unconfirmed — the
+    `ShellTool`'s commands, `FilesystemTool`'s `write`/`delete`, and
+    `AppControlTool`'s `close` go through `ConfirmationHook` (ADR 0025,
+    ADR 0026), which asks on the console before each one runs; everything
+    else in the suite, including opening apps, listing/switching windows,
+    and media control (ADR 0024), runs unconfirmed — the
     `ToolAllowlistPolicy` below is what stands between an unregistered
     tool and the model, not a per-call checkpoint, for the tools that
     cannot destroy anything irrecoverably.
@@ -73,6 +76,7 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
     context.tools.register(DiffTool(workspace), context)
     context.tools.register(TestRunnerTool(workspace), context)
     context.tools.register(AppLauncherTool(), context)
+    context.tools.register(AppControlTool(), context)
     context.tools.register(MediaControlTool(), context)
 
     context.assistant.set_permission_policy(ToolAllowlistPolicy(TOOL_IDS))
