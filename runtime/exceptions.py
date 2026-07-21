@@ -191,3 +191,14 @@ class RequestValidationError(AssistantError):
     Covers structural issues (text, metadata, turn shape) and invalid
     `RequestStatus` transitions.
     """
+
+
+class ToolCallVetoedError(AssistantError):
+    """Raised by a `before_tool` hook to block a tool call it did not approve.
+
+    `ToolCallRunner` treats any exception from `before_tool` as a veto
+    (ADR 0013); this is the typed one `ConfirmationHook`
+    (`runtime.assistant.confirmation`) raises when a user declines a
+    destructive action, so the reason recorded in the conversation reads
+    as a decision, not an error.
+    """

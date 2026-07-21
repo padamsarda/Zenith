@@ -51,3 +51,4 @@ longer applies or accidentally reversing one that still does.
 - [0022 — A session must be able to act, and must fail loudly when it cannot](0022-a-session-must-be-able-to-act.md)
 - [0023 — Recording what a session changed, as an observation that cannot fail](0023-recording-what-a-session-changed.md)
 - [0024 — Desktop control: the first tools that act on the OS, not a sandboxed root](0024-desktop-control-the-first-os-acting-tools.md)
+- [0025 — main.py as composition root, with destructive tools behind a confirmation hook](0025-main-as-composition-root-with-confirmed-destructive-tools.md)

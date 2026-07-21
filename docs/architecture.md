@@ -80,7 +80,13 @@ everything else (`Config`, `Event`) is immutable.
    `plugin.py` files under `base_path / "plugins"` and registers each
    one. A plugin that fails to load or register is logged and skipped —
    never fatal to startup.
-8. `context.state = RUNNING`; emit `ApplicationStarted`.
+8. If `on_start` was supplied to `Runtime.__init__`, call it with the
+   fully initialized `ApplicationContext` (ADR 0025). This is the seam a
+   specific deployment uses to register real providers, tools, permission
+   policies, and hooks — `Runtime` itself calls whatever it was given and
+   knows nothing about what runs. `main.py`'s `_wire_zeni` is the first
+   user of this seam.
+9. `context.state = RUNNING`; emit `ApplicationStarted`.
 
 ## Serving (`Runtime.run`)
 
@@ -100,7 +106,7 @@ shutdown either way, and `stop()` always runs.
 
 | Module | Responsibility |
 |---|---|
-| `runtime/runtime.py` | Owns the lifecycle; the only module `main.py` depends on. |
+| `runtime/runtime.py` | Owns the lifecycle. `main.py` also depends on the specific providers/tools/policies/hooks it composes at startup through `Runtime`'s `on_start` seam (ADR 0025). |
 | `runtime/context.py` | `ApplicationContext` dataclass. |
 | `runtime/state.py` | `RuntimeState` enum. |
 | `runtime/exceptions.py` | Exception hierarchy for the runtime's own subsystems (service registry, event bus, commands, plugins, conversations, capabilities, assistant). Rooted at `shared.exceptions.ZenithError`. |
@@ -114,8 +120,8 @@ shutdown either way, and `stop()` always runs.
 | `runtime/conversation/` | `Message`, `Conversation`, `ConversationState`, the `ConversationStore` ABC, `InMemoryConversationStore`, `SQLiteConversationStore` (ADR 0018), and concrete conversation events. See `assistant.md`. |
 | `runtime/capabilities/` | `Tool`, `Skill`, their registries, the `CapabilityCatalog`, and concrete capability events. See `assistant.md`. |
 | `runtime/providers/` | `AssistantProvider`, `TurnBrief`, `AssistantTurn`, `ToolCall`, `AssistantProviderRegistry`, the built-in `EchoProvider` / `ScriptedProvider`, and `ClaudeProvider` (ADR 0015). See `assistant.md`. |
-| `runtime/tools/` | `FilesystemTool`, `ShellTool`, `GitTool`, `DiffTool`, `TestRunnerTool`, and the shared `sandbox`/`process`/`arguments` helpers they build on (ADR 0016). See `assistant.md`. |
-| `runtime/assistant/` | `AssistantRequest`, `AssistantResponse`, `AssistantEngine`, `ToolCallRunner`, `AssistantContextAssembler`, `PermissionPolicy`, `AssistantHook`, and concrete assistant events. See `assistant.md`. |
+| `runtime/tools/` | `FilesystemTool`, `ShellTool`, `GitTool`, `DiffTool`, `TestRunnerTool`, `AppLauncherTool`, `MediaControlTool` (ADR 0024), and the shared `sandbox`/`process`/`arguments` helpers they build on (ADR 0016). See `assistant.md`. |
+| `runtime/assistant/` | `AssistantRequest`, `AssistantResponse`, `AssistantEngine`, `ToolCallRunner`, `AssistantContextAssembler`, `PermissionPolicy`, `AssistantHook`, `ConfirmationHook` (ADR 0025), and concrete assistant events. See `assistant.md`. |
 | `shared/exceptions.py` | Generic exception hierarchy (`ZenithError` and a handful of domain-agnostic subclasses, including `EventBusError`) with no dependency on a specific runtime subsystem. |
 | `shared/events/` | The event system: `Event`, `EventBus`, `EventLogger`. |
 | `shared/utils/` | Small, reusable helpers (time, UUID, filesystem, text) with no dependency on `runtime/`. |

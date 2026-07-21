@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from configs.config import Config, load_config
@@ -56,19 +57,34 @@ class Runtime:
     runs.
     """
 
-    def __init__(self, base_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        base_path: Path | None = None,
+        *,
+        on_start: Callable[[ApplicationContext], None] | None = None,
+    ) -> None:
         """Create a Runtime.
 
         Args:
             base_path: Root directory of the project. Defaults to the
                 directory containing this package's parent (the project
                 root).
+            on_start: Called once, at the end of `start()`, with the
+                fully initialized `ApplicationContext` — after the
+                built-in `EchoProvider` and plugins are registered, before
+                `state` becomes `RUNNING`. This is the seam a specific
+                deployment (e.g. `main.py`) uses to register real
+                providers, tools, permission policies, and hooks without
+                `Runtime` itself knowing anything about them; `Runtime`
+                stays generic infrastructure regardless of what a given
+                deployment wires through it.
         """
         self.base_path: Path = base_path or Path(__file__).resolve().parent.parent
         self.context: ApplicationContext = ApplicationContext(
             config=Config(),
             logger=logging.getLogger("zenith"),
         )
+        self._on_start = on_start
 
     @property
     def state(self) -> RuntimeState:
@@ -111,6 +127,8 @@ class Runtime:
 
         self._initialize_assistant()
         self._load_plugins()
+        if self._on_start is not None:
+            self._on_start(self.context)
 
         self.context.state = RuntimeState.RUNNING
         self.context.logger.info("Zenith runtime started.")

@@ -440,6 +440,18 @@ def test_default_policy_allows_everything() -> None:
     assert isinstance(app_context.assistant.permission_policy, AllowAllPolicy)
 
 
+def test_hooks_starts_empty_and_reflects_additions_in_order() -> None:
+    app_context = make_application_context()
+    first, second = AssistantHook(), AssistantHook()
+
+    assert app_context.assistant.hooks == ()
+
+    app_context.assistant.add_hook(first)
+    app_context.assistant.add_hook(second)
+
+    assert app_context.assistant.hooks == (first, second)
+
+
 # --- response shape -----------------------------------------------------
 
 

@@ -60,6 +60,11 @@ class AssistantEngine:
         """The policy consulted before every tool call."""
         return self._policy
 
+    @property
+    def hooks(self) -> tuple[AssistantHook, ...]:
+        """The hooks currently attached, in the order they run."""
+        return tuple(self._hooks)
+
     def set_permission_policy(self, policy: PermissionPolicy) -> None:
         """Replace the permission policy consulted before every tool call."""
         self._policy = policy

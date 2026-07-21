@@ -74,6 +74,39 @@ def test_runtime_has_an_application_context() -> None:
     assert runtime.context.state is RuntimeState.INITIALIZING
 
 
+def test_on_start_is_called_with_the_context_before_running() -> None:
+    seen: list[RuntimeState] = []
+
+    def on_start(context) -> None:
+        seen.append(context.state)
+
+    runtime = Runtime(base_path=PROJECT_ROOT, on_start=on_start)
+
+    runtime.start()
+
+    assert seen == [RuntimeState.STARTING]  # state flips to RUNNING right after on_start
+    runtime.stop()
+
+
+def test_on_start_receives_the_runtimes_own_context() -> None:
+    received = []
+    runtime = Runtime(base_path=PROJECT_ROOT, on_start=received.append)
+
+    runtime.start()
+
+    assert received == [runtime.context]
+    runtime.stop()
+
+
+def test_no_on_start_is_fine() -> None:
+    runtime = Runtime(base_path=PROJECT_ROOT)
+
+    runtime.start()
+
+    assert runtime.state is RuntimeState.RUNNING
+    runtime.stop()
+
+
 def test_runtime_start_emits_application_starting() -> None:
     runtime = Runtime(base_path=PROJECT_ROOT)
     received: list[Event] = []

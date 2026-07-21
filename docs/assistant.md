@@ -416,9 +416,6 @@ else, with a reason recorded in the conversation.
 context.assistant.set_permission_policy(ToolAllowlistPolicy(["filesystem", "git"]))
 ```
 
-Per-tool user confirmation is not built — a `before_tool`
-`AssistantHook` is the seam for it, not a new mechanism.
-
 `AssistantHook` (`runtime/assistant/hooks.py`) is arbitrary code at
 four points. The two kinds differ deliberately:
 
@@ -437,6 +434,28 @@ like a failing `EventBus` listener.
 ```python
 context.assistant.add_hook(MyHook())   # hooks run in the order added
 ```
+
+`AssistantEngine.hooks` returns the currently attached hooks, in the
+order they run — the same introspection `permission_policy` already
+gives for the policy.
+
+**`ConfirmationHook`** (`runtime/assistant/confirmation.py`, ADR 0025)
+is the per-tool user confirmation the previous version of this
+paragraph called unbuilt: a `before_tool` hook that asks for explicit
+approval before a call that could destroy something irrecoverably runs
+— any `shell` call, and `filesystem`'s `write`/`delete` operations.
+Declining raises `ToolCallVetoedError`, recorded as a denial like any
+other. Everything else is unaffected, including `AppLauncherTool`/
+`MediaControlTool` (ADR 0024), since none of it can lose data.
+
+```python
+context.assistant.add_hook(ConfirmationHook())
+```
+
+The default `Confirmer` blocks on `input()` against the console's own
+stdin; it is injected (`ConfirmationHook(confirmer=...)`) so tests never
+block on real input, and so a future non-console interface can supply
+its own confirmation UI instead of reusing this one.
 
 ### Events
 

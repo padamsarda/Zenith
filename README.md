@@ -78,6 +78,28 @@ integrated. Swapping in a real one is configuration
 (`assistant_provider`), not a code change. See
 [`docs/assistant.md`](docs/assistant.md).
 
+### Running Zeni for real
+
+With `ANTHROPIC_API_KEY` set, `main.py` also registers `ClaudeProvider`,
+a tool suite (filesystem, shell, git, diff, test runner, and the desktop
+control tools below), and a `ConfirmationHook` that asks on the console
+before any destructive call (`shell`, or `filesystem`'s `write`/
+`delete`) actually runs — see [ADR 0025](architecture/0025-main-as-composition-root-with-confirmed-destructive-tools.md).
+Set `assistant_provider = "claude"` and `interactive = true` in
+`configs/config.toml` to actually talk to it:
+
+```
+$ ANTHROPIC_API_KEY=sk-... python main.py
+you> open spotify
+zenith> Opened Spotify.
+you> pause the music
+zenith> Sent play_pause x1.
+```
+
+Opening applications and controlling media/volume by name
+([ADR 0024](architecture/0024-desktop-control-the-first-os-acting-tools.md))
+runs unconfirmed — neither can lose data.
+
 ## Running the Engineering Manager
 
 One objective, from a sentence to a finished, reviewed, reported change:

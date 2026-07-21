@@ -257,8 +257,8 @@ timed, and observable from day one, exactly as the pipeline promised.
 `ToolAllowlistPolicy` (`runtime/assistant/permissions.py`) is the real
 `PermissionPolicy` this milestone anticipated: `AllowAllPolicy` stopped
 being honest the moment a tool could genuinely act on the world.
-Per-tool user confirmation remains open — a `before_tool` `AssistantHook`
-is the seam for it, not a new mechanism. Skills shipped too:
+Per-tool user confirmation shipped in item 7 below (`ConfirmationHook`,
+ADR 0025), through exactly this seam. Skills shipped too:
 `EngineeringWorkflowSkill` (`plugins/engineering_workflow/`, ADR 0017)
 is the first genuine skill, teaching a safe order of operations over
 the tool suite above. A skill whose `applies_to` opts in automatically,
@@ -291,17 +291,26 @@ Bluetooth, and display management (all named in the product vision, none
 built — see ADR 0024's consequences), and an absolute volume level
 (needs the Windows Core Audio COM API, which has no stdlib binding).
 
-### 7. A real, runnable Zeni — next
+### 7. A real, runnable Zeni — shipped
 
-Every piece above is still library code: `Runtime._initialize_assistant`
-registers only `EchoProvider`, and no entry point registers
-`ClaudeProvider`, `ToolAllowlistPolicy`, or the tool suite together for
-actual daily use. The next milestone is a composition root — plausibly
-`main.py` itself, reading credentials from the environment the same way
-`ClaudeProvider` already does — that turns `python main.py` into an
-assistant genuinely worth talking to, not just a pipeline with tools
-available to whoever wires them. This needs no new mechanism, only
-assembling what ADR 0015, 0016, and 0024 already built.
+`main.py` is now the composition root (ADR 0025): `Runtime` gained one
+generic seam (`on_start`), and `main.py`'s `_wire_zeni` uses it to
+register `ClaudeProvider`, the full `runtime/tools/` suite (including
+the ADR 0024 desktop tools), a `ToolAllowlistPolicy` naming exactly
+those tools, and a new `ConfirmationHook` gating `shell` and
+`filesystem`'s `write`/`delete` behind an explicit console approval —
+the "no unattended checkpoint" gap flagged when desktop control shipped.
+It is a no-op without `ANTHROPIC_API_KEY` set, so nothing about a
+credential-less checkout's behavior changed. `assistant_provider =
+"claude"` in `configs/config.toml` is still what actually switches to
+it, unchanged from the "configuration, not a code change" contract
+`README.md` already documented.
+
+Still open: the default `Confirmer` blocks on the console's stdin,
+which only the console interface has — a future voice/GUI/network
+interface needs its own. A configurable workspace root (today, always
+`Path.cwd()`) is the natural next knob if daily use shows the current
+working directory isn't the right default.
 
 ## Repository-wide
 

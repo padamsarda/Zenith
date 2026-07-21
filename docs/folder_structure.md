@@ -1,7 +1,11 @@
 # Folder Structure
 
 ```
-main.py                        Entry point for the Zenith runtime.
+main.py                        Entry point for the Zenith runtime, and Zeni's
+                                 composition root: _wire_zeni registers the real
+                                 provider, tool suite, permission policy, and
+                                 confirmation hook when ANTHROPIC_API_KEY is set
+                                 (ADR 0025).
 
 runtime/                       The Zenith assistant runtime.
     __init__.py                 Package marker only (no imports — see architecture.md).
@@ -82,8 +86,11 @@ runtime/                       The Zenith assistant runtime.
         request.py               AssistantRequest.
         response.py              AssistantResponse.
         events.py                Concrete assistant pipeline events.
-        permissions.py           PermissionPolicy ABC, AllowAllPolicy.
+        permissions.py           PermissionPolicy ABC, AllowAllPolicy,
+                                   ToolAllowlistPolicy.
         hooks.py                 AssistantHook.
+        confirmation.py          ConfirmationHook: confirms destructive tool
+                                   calls before they run (ADR 0025).
         assembler.py             AssistantContextAssembler: composes TurnBriefs.
         tool_runner.py           ToolCallRunner: executes one tool call.
         engine.py                AssistantEngine: the request pipeline.
