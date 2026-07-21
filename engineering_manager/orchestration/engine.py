@@ -33,6 +33,10 @@ from engineering_manager.exceptions import (
 )
 from engineering_manager.orchestration.dispatcher import SOURCE, Dispatcher
 from engineering_manager.orchestration.retry import LimitedRetryPolicy, RetryPolicy
+from engineering_manager.orchestration.verification import (
+    NoVerificationPolicy,
+    VerificationPolicy,
+)
 from engineering_manager.providers.base import ProviderSessionState, SessionHandle
 from engineering_manager.providers.registry import ProviderRegistry
 from engineering_manager.store.store import Store
@@ -91,6 +95,7 @@ class ExecutionEngine:
         providers: ProviderRegistry,
         *,
         retry_policy: RetryPolicy | None = None,
+        verification_policy: VerificationPolicy | None = None,
         bus: EventBus | None = None,
         clock: Callable[[], datetime] = utc_now,
         limit_backoff: timedelta = DEFAULT_LIMIT_BACKOFF,
@@ -100,10 +105,21 @@ class ExecutionEngine:
         self._dispatcher = dispatcher
         self._providers = providers
         self._retry_policy = retry_policy or LimitedRetryPolicy()
+        self._verification_policy = verification_policy or NoVerificationPolicy()
         self._bus = bus or EventBus()
         self._clock = clock
         self._limit_backoff = limit_backoff
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
+
+    def set_verification_policy(self, policy: VerificationPolicy) -> None:
+        """Replace the policy that checks a session's claimed completion.
+
+        Mirrors `AssistantEngine.set_permission_policy` in the runtime:
+        a policy seam that can be reconfigured after construction, since
+        callers (e.g. the CLI) often only know the desired policy once
+        arguments are parsed, after the engine already exists.
+        """
+        self._verification_policy = policy
 
     def tick(self) -> TickReport:
         """Advance the system one deterministic step and report what moved."""
@@ -196,8 +212,10 @@ class ExecutionEngine:
                 failed.append(session.session_id)
                 continue
             if status.state is ProviderSessionState.FINISHED:
-                self._dispatcher.complete_session(session.session_id, summary=status.detail)
-                completed.append(session.session_id)
+                if self._verify_completion(session, status.detail):
+                    completed.append(session.session_id)
+                else:
+                    failed.append(session.session_id)
             elif status.state is ProviderSessionState.FAILED:
                 self._dispatcher.fail_session(session.session_id, reason=status.detail)
                 failed.append(session.session_id)
@@ -291,6 +309,30 @@ class ExecutionEngine:
         return started, attention
 
     # -- internals ---------------------------------------------------------
+
+    def _verify_completion(self, session: Session, provider_detail: str | None) -> bool:
+        """Check a FINISHED session's claim before trusting it; complete or fail it.
+
+        Runs the configured `VerificationPolicy` against the session's
+        task and project. A pass completes the session exactly as before
+        (`provider_detail` as the summary); a failure fails the session
+        instead, with the verification's own detail as the reason — an
+        ordinary recoverable failure the retry phase re-evaluates like
+        any other, not a new terminal outcome.
+
+        Returns True if the session completed, False if it failed.
+        """
+        task = self._store.get_task(session.task_id)
+        project = self._store.get_project(session.project_id)
+        result = self._verification_policy.verify(task, project)
+        if result.passed:
+            self._dispatcher.complete_session(session.session_id, summary=provider_detail)
+            return True
+        self._dispatcher.fail_session(
+            session.session_id,
+            reason=result.detail or "Verification failed with no detail.",
+        )
+        return False
 
     def _transition_task_to_ready(self, task: Task) -> None:
         """Return a FAILED task to READY for another attempt."""

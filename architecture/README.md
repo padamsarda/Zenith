@@ -45,3 +45,5 @@ longer applies or accidentally reversing one that still does.
 - [0016 — Filesystem, Shell, Git, Diff, and Test Runner: the first production tool suite](0016-filesystem-shell-git-diff-test-runner-tool-suite.md)
 - [0017 — Plugin discovery and loading from disk](0017-plugin-discovery-and-loading-from-disk.md)
 - [0018 — SQLite-backed durable conversations](0018-sqlite-backed-durable-conversations.md)
+- [0019 — A verification gate between a provider's FINISHED and NEEDS_REVIEW](0019-verification-gate-before-needs-review.md)
+- [0020 — AI-performed planning through an ordinary Provider session](0020-ai-performed-planning.md)

@@ -51,6 +51,13 @@ def build_parser() -> argparse.ArgumentParser:
     project_add.add_argument("--path", type=Path, default=Path("."), help="Repository root.")
     project_add.add_argument("--description")
     project_commands.add_parser("list", help="List managed projects.")
+    project_report = project_commands.add_parser(
+        "report", help="Render a Markdown engineering report for a project."
+    )
+    project_report.add_argument("project_id")
+    project_report.add_argument(
+        "--out", type=Path, help="Write the report to this file instead of stdout."
+    )
 
     plan = commands.add_parser("plan", help="Manage plans (goal-level work).")
     plan_commands = plan.add_subparsers(dest="subcommand", required=True)
@@ -58,6 +65,27 @@ def build_parser() -> argparse.ArgumentParser:
     plan_add.add_argument("project_id")
     plan_add.add_argument("goal")
     plan_add.add_argument("--description")
+    plan_from_goal = plan_commands.add_parser(
+        "from-goal",
+        help="Ask a provider to decompose a goal into a reviewable plan (still DRAFT).",
+    )
+    plan_from_goal.add_argument("project_id")
+    plan_from_goal.add_argument("goal")
+    plan_from_goal.add_argument("--description")
+    plan_from_goal.add_argument("--provider", default="claude-code")
+    plan_from_goal.add_argument("--account", required=True)
+    plan_from_goal.add_argument("--model")
+    plan_from_goal.add_argument(
+        "--claude-command",
+        default="claude",
+        help="Executable used to invoke Claude Code (default: claude).",
+    )
+    plan_from_goal.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=600.0,
+        help="How long to wait for the planning session to finish (default: 600).",
+    )
     plan_list = plan_commands.add_parser("list", help="List plans.")
     plan_list.add_argument("--project")
     plan_show = plan_commands.add_parser("show", help="Show a plan's task graph.")
@@ -135,6 +163,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--claude-command",
         default="claude",
         help="Executable used to invoke Claude Code (default: claude).",
+    )
+    run.add_argument(
+        "--verify-command",
+        help=(
+            "Command run in a task's project directory before trusting a "
+            "session's claimed completion (e.g. \"python -m pytest\"); a "
+            "nonzero exit fails the session so it re-enters the retry loop "
+            "instead of reaching NEEDS_REVIEW. Omit to trust providers as-is."
+        ),
+    )
+    run.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=600.0,
+        help="Seconds allowed for --verify-command (default: 600).",
     )
 
     return parser

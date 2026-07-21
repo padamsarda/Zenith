@@ -82,16 +82,20 @@ integrated. Swapping in a real one is configuration
 
 ```bash
 python -m engineering_manager project add zenith "Zenith" --path .
-python -m engineering_manager plan add zenith "Ship plugin support"
-python -m engineering_manager task add zenith "Implement plugin loading" --plan <plan-id> --priority 5
+python -m engineering_manager plan from-goal zenith "Ship plugin support" --account personal
+python -m engineering_manager plan show <plan-id>       # review the AI-drafted tasks
 python -m engineering_manager plan approve <plan-id>
-python -m engineering_manager plan show <plan-id>
-python -m engineering_manager status
+python -m engineering_manager run --verify-command "python -m pytest"
+python -m engineering_manager project report zenith
 ```
 
-State persists in `~/.zenith/engineering_manager.db` (override with
-`--db`). See [`docs/engineering_manager.md`](docs/engineering_manager.md)
-for the architecture and programmatic API, and
+`plan from-goal` asks a provider to decompose the goal into a reviewable
+`DRAFT` plan; `run --verify-command` checks a claimed completion before
+trusting it, instead of taking a provider's word for it; `project
+report` renders what happened while the engine ran. State persists in
+`~/.zenith/engineering_manager.db` (override with `--db`). See
+[`docs/engineering_manager.md`](docs/engineering_manager.md) for the
+architecture and programmatic API, and
 [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 ## Development

@@ -22,11 +22,14 @@ EngineeringManager (manager.py)          the facade every interface uses
   ├─ ProviderRegistry (providers/)       available Provider integrations
   ├─ EventBus (shared/events)            live in-process notifications
   ├─ PlanCoordinator (orchestration/)    goal -> plan -> approved tasks
+  ├─ PlanningSessionRunner (orchestration/) goal -> AI-decomposed DRAFT plan
   ├─ Dispatcher (orchestration/)         task -> account -> session
   │    ├─ AssignmentPolicy               chooses the account
   │    └─ ContextAssembler               composes the session brief
-  └─ ExecutionEngine (orchestration/)    the reconcile-and-advance tick
-       └─ RetryPolicy                    decides if failed work reruns
+  ├─ ExecutionEngine (orchestration/)    the reconcile-and-advance tick
+  │    ├─ RetryPolicy                    decides if failed work reruns
+  │    └─ VerificationPolicy             checks a claimed completion before trusting it
+  └─ report.py (orchestration/)          durable state -> a Markdown status report
 ```
 
 Domain objects (`domain/`) follow the same patterns as the runtime's
@@ -60,6 +63,13 @@ gain predecessors — guarded by an explicit cycle check
 structure on demand: `execution_waves` (what may run in parallel) and
 `blockages` (what is blocked, or doomed by a cancelled dependency —
 surfaced via `manager.blocked_tasks`).
+
+A plan's tasks need not be decomposed by hand: `manager.plan_from_goal`
+(ADR 0020) asks a registered `Provider` to break the goal into tasks and
+dependencies, then writes the result through the ordinary `add_plan`/
+`add_task`/`add_task_dependency` path — the plan lands in `DRAFT`,
+exactly as reviewable as one a human wrote, since `approve_plan` is
+still the only gate to dispatch. See "AI-performed planning" below.
 
 ### Task lifecycle (ADR 0006)
 
@@ -158,6 +168,46 @@ still running, which surfaces as an unknown-handle error the execution
 engine already treats as lost work and recovers from via the retry
 policy.
 
+## AI-performed planning (ADR 0020)
+
+`manager.plan_from_goal(project_id, goal, provider_id=..., account_id=...,
+description=None, model=None)` turns a goal into a reviewable plan with
+no human decomposing it by hand:
+
+```python
+plan = manager.plan_from_goal(
+    "zenith", "Ship plugin support", provider_id="claude-code", account_id="personal"
+)
+# plan is DRAFT, its tasks are DRAFT — review, then:
+manager.approve_plan(plan.plan_id)
+```
+
+1. Records the goal as a `DRAFT` plan immediately (`add_plan`), so even
+   a failed attempt below leaves an auditable trace.
+2. `PlanningSessionRunner` (`orchestration/planning.py`) runs one
+   bounded, synchronous session through the *same* `Provider` contract
+   (ADR 0005) real engineering work uses, asking it to respond with a
+   JSON task array — polling itself to completion rather than being
+   driven by `ExecutionEngine`'s ticks, since a caller is actively
+   waiting on it. A `LIMIT_REACHED`/`AWAITING_INPUT`/`FAILED` report, or
+   a timeout, raises `OrchestrationError`; the empty `DRAFT` plan stays
+   behind either way.
+3. `parse_decomposition` (`orchestration/planning_decomposition.py`)
+   tolerantly extracts a JSON array from the output (markdown fences and
+   surrounding prose are stripped) into `TaskDraft`s; an item missing a
+   usable title is skipped rather than failing the whole decomposition.
+4. Each draft becomes a task via the ordinary `add_task`; each
+   `depends_on` index becomes an edge via the ordinary
+   `add_task_dependency` — a would-be cycle or bad index is logged and
+   skipped, not raised, since the plan is reviewed before it can run
+   regardless. Publishes `PlanDecomposed` on success.
+
+`approve_plan` remains the only gate to dispatch (ADR 0009) — an
+AI-authored decomposition is exactly as safe to accept into the store as
+a human-authored one, because nothing in it can execute unreviewed.
+
+The CLI: `plan from-goal <project_id> "<goal>" --account <id> [--provider claude-code] [--model ...] [--timeout-seconds 600]`.
+
 ## Persistence (ADR 0004)
 
 `store/` is stdlib `sqlite3` behind one `Store` class:
@@ -216,6 +266,15 @@ genuinely run several sessions at once and others exactly one. Further
 policies (cost, capability, past performance) replace either class
 without touching the dispatcher.
 
+`VerificationPolicy` (`orchestration/verification.py`, ADR 0019) is the
+seam for "should this claimed completion be trusted?", consulted by the
+execution engine — see below — not the dispatcher. `NoVerificationPolicy`
+is the default (trusts every provider). `CommandVerificationPolicy` runs
+a command (default `python -m pytest`) in the task's project directory,
+synchronously, with a timeout; a nonzero exit or a timeout fails
+verification, with captured output as the detail. Configure it with
+`manager.set_verification_policy(...)`.
+
 ### The execution engine (ADR 0008)
 
 `ExecutionEngine` (`orchestration/engine.py`) is what turns all of the
@@ -223,8 +282,15 @@ above from bookkeeping into autonomous execution. One synchronous,
 deterministic `tick()` advances the whole system in a fixed order:
 
 1. **Reconcile** every `ACTIVE` session against `check_session`:
-   `FINISHED` → `complete_session` (the provider's `detail` becomes the
-   session summary); `FAILED` → `fail_session`; `LIMIT_REACHED` →
+   `FINISHED` → checked against the configured `VerificationPolicy`
+   (ADR 0019) before being trusted: a pass calls `complete_session` (the
+   provider's `detail` becomes the session summary) exactly as before; a
+   failure calls `fail_session` instead, with the policy's own detail as
+   the reason — an ordinary recoverable failure the retry phase below
+   re-evaluates like any other, not a new outcome. The default
+   `NoVerificationPolicy` always passes, so this is a no-op unless a
+   policy is configured (`manager.set_verification_policy`, or the CLI's
+   `run --verify-command`). `FAILED` → `fail_session`; `LIMIT_REACHED` →
    `interrupt_session` with a `resume_at` (the provider's, or now + a
    configured backoff); `AWAITING_INPUT` → interrupt with no
    `resume_at` plus an `AttentionRequired` event. A provider that
@@ -267,18 +333,33 @@ providers influence future context purely by summarizing well. Nothing
 is stored, so the brief can never go stale and survives restarts by
 construction.
 
+## Engineering reports
+
+`manager.project_report(project_id)` renders a Markdown status report —
+plans, a task-status breakdown, work in `NEEDS_REVIEW` with its
+completing session's summary, blocked tasks (`orchestration/graph.py`'s
+`blockages`), recent `AttentionRequired` entries for the project's own
+tasks, and a session-outcome summary — composed by `build_report`
+(`orchestration/report.py`) deterministically from durable state alone,
+the same principle `ContextAssembler` applies to session briefs. This is
+the "what happened while I was away" a human needs after leaving the
+engine running unattended; nothing here is stored, so the report is
+always current. CLI: `project report <project_id> [--out PATH]`.
+
 ## Events
 
 Defined in `engineering_manager/events.py`, emitted with
 `source="engineering_manager"`, persisted to the event log, and emitted
 on the bus: `ProjectAdded`, `ProjectStatusChanged`, `PlanAdded`,
-`PlanStatusChanged`, `TaskAdded`, `TaskDependencyAdded`,
+`PlanDecomposed`, `PlanStatusChanged`, `TaskAdded`, `TaskDependencyAdded`,
 `TaskStatusChanged`, `SessionStarted`, `SessionStatusChanged`,
 `AttentionRequired`, `AccountAdded`, `AccountRemoved`. Status-change
 events carry `from`/`to` in the payload; subscribers filter on payload
 rather than having one event type per transition. `AttentionRequired`
 is the engine's signal that only a human can move something forward
 (payload `kind`: `session_awaiting_input` or `task_retries_exhausted`).
+`PlanDecomposed` (payload: `plan_id`, `project_id`, `task_count`) marks
+a successful `plan_from_goal` (ADR 0020).
 
 ## CLI
 
@@ -288,6 +369,7 @@ python -m engineering_manager [--db PATH] <command>
 python -m engineering_manager init
 python -m engineering_manager project add zenith "Zenith" --path .
 python -m engineering_manager plan add zenith "Ship plugin support"
+python -m engineering_manager plan from-goal zenith "Ship plugin support" --account personal
 python -m engineering_manager task add zenith "Implement the loader" --plan <plan-id> --priority 5
 python -m engineering_manager task depend <task-id> <depends-on-id>
 python -m engineering_manager plan approve <plan-id>
@@ -296,15 +378,22 @@ python -m engineering_manager task approve <task-id>    # standalone tasks
 python -m engineering_manager task list --status READY
 python -m engineering_manager account add claude-code personal
 python -m engineering_manager status
+python -m engineering_manager project report zenith --out report.md
 python -m engineering_manager log
-python -m engineering_manager run --interval 30 --max-ticks 10
+python -m engineering_manager run --interval 30 --max-ticks 10 --verify-command "python -m pytest"
 ```
 
 The database defaults to `~/.zenith/engineering_manager.db`. `run`
 registers `ClaudeCodeProvider` (`--claude-command` overrides the
 executable, default `claude`) and calls `manager.run()`; accounts must
 already exist (`account add claude-code <id>`) for anything to actually
-dispatch. Programmatic use, or wiring a different provider:
+dispatch. `--verify-command` configures a `CommandVerificationPolicy`
+(ADR 0019) so a claimed completion is checked before `NEEDS_REVIEW`,
+rather than trusted outright — the recommended setting for anything left
+running unattended. `plan from-goal` registers `ClaudeCodeProvider` the
+same way and asks it to decompose the goal (ADR 0020); `--provider`
+names a different registered provider instead. Programmatic use, or
+wiring a different provider:
 
 ```python
 from pathlib import Path
@@ -328,9 +417,17 @@ Documented here so they read as decisions, not oversights (details in
   0014), generalizing the watchdog, and the CLI's `run` command it
   unblocked. A second real adapter (e.g. an HTTP-API provider) remains
   the next pressure test of the contract's provider-agnosticism.
-- **AI-performed planning** — plans are the representation; a
-  planning-provider session that writes a decomposition through the
-  facade is future work needing no new mechanism.
+- **AI-performed planning** — shipped: `manager.plan_from_goal` (ADR
+  0020) runs a planning-provider session and writes the decomposition
+  through the facade, exactly as anticipated, needing no new mechanism.
+- **A verification gate before NEEDS_REVIEW** — shipped:
+  `VerificationPolicy` (ADR 0019), consulted by the execution engine
+  when a provider reports `FINISHED`; a failure is folded into the
+  existing retry loop via `fail_session`, not a new outcome kind.
+- **Engineering reports** — shipped: `manager.project_report` composes
+  a Markdown status report from durable state alone
+  (`orchestration/report.py`); no new storage, since everything it reads
+  already exists.
 - **Cross-call transactions** — each store method commits itself;
   fine while one process owns the database (ADR 0004).
 - **Richer completion reports** — context assembly (ADR 0010) reads

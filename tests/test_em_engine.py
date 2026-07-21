@@ -19,6 +19,10 @@ from engineering_manager.orchestration.engine import (
     TickReport,
 )
 from engineering_manager.orchestration.retry import LimitedRetryPolicy
+from engineering_manager.orchestration.verification import (
+    VerificationPolicy,
+    VerificationResult,
+)
 from engineering_manager.providers.base import (
     ProviderSessionState,
     ProviderSessionStatus,
@@ -33,10 +37,30 @@ from shared.events.event import Event
 START = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
 
 
+class ScriptedVerificationPolicy(VerificationPolicy):
+    """A VerificationPolicy whose next result is set by the test."""
+
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+        self._result = VerificationResult(passed=True)
+
+    def script(self, result: VerificationResult) -> None:
+        self._result = result
+
+    def verify(self, task, project):  # noqa: ANN001 - test double, matches ABC signature
+        self.calls.append(task.task_id)
+        return self._result
+
+
 class Harness:
     """Store + provider + dispatcher + engine with a scripted clock."""
 
-    def __init__(self, tmp_path: Path, max_attempts: int = 3) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        max_attempts: int = 3,
+        verification_policy: VerificationPolicy | None = None,
+    ) -> None:
         self.store = Store(tmp_path / "em.db")
         self.provider = InMemoryProvider()
         self.providers = ProviderRegistry()
@@ -51,6 +75,7 @@ class Harness:
             self.dispatcher,
             self.providers,
             retry_policy=LimitedRetryPolicy(max_attempts=max_attempts),
+            verification_policy=verification_policy,
             bus=self.bus,
             clock=lambda: self.now,
         )
@@ -128,6 +153,67 @@ def test_tick_completes_finished_sessions(harness: Harness) -> None:
     assert report.sessions_completed == (session_id,)
     assert harness.store.get_session(session_id).summary == "All tests green."
     assert harness.store.get_task(task.task_id).status is TaskStatus.NEEDS_REVIEW
+
+
+def test_tick_completes_finished_session_that_passes_verification(tmp_path: Path) -> None:
+    policy = ScriptedVerificationPolicy()
+    policy.script(VerificationResult(passed=True))
+    harness = Harness(tmp_path, verification_policy=policy)
+    try:
+        task = harness.add_ready_task()
+        (session_id,) = harness.engine.tick().sessions_started
+        harness.script(session_id, ProviderSessionState.FINISHED, detail="Provider says done.")
+
+        report = harness.engine.tick()
+
+        assert report.sessions_completed == (session_id,)
+        assert policy.calls == [task.task_id]
+        assert harness.store.get_task(task.task_id).status is TaskStatus.NEEDS_REVIEW
+        assert harness.store.get_session(session_id).summary == "Provider says done."
+    finally:
+        harness.close()
+
+
+def test_tick_fails_finished_session_that_fails_verification(tmp_path: Path) -> None:
+    policy = ScriptedVerificationPolicy()
+    policy.script(VerificationResult(passed=False, detail="pytest: 2 failed"))
+    harness = Harness(tmp_path, verification_policy=policy)
+    try:
+        task = harness.add_ready_task()
+        (session_id,) = harness.engine.tick().sessions_started
+        harness.script(session_id, ProviderSessionState.FINISHED, detail="Provider says done.")
+
+        report = harness.engine.tick()
+
+        assert report.sessions_completed == ()
+        assert report.sessions_failed == (session_id,)
+        # A verification failure is an ordinary recoverable failure: the
+        # same tick's retry phase already re-queued and redispatched it.
+        assert report.tasks_retried == (task.task_id,)
+        assert len(report.sessions_started) == 1
+        session = harness.store.get_session(session_id)
+        assert session.status is SessionStatus.FAILED
+        assert session.summary == "pytest: 2 failed"
+    finally:
+        harness.close()
+
+
+def test_set_verification_policy_takes_effect_on_next_tick(tmp_path: Path) -> None:
+    harness = Harness(tmp_path)
+    try:
+        policy = ScriptedVerificationPolicy()
+        policy.script(VerificationResult(passed=False, detail="lint failed"))
+        harness.engine.set_verification_policy(policy)
+        task = harness.add_ready_task()
+        (session_id,) = harness.engine.tick().sessions_started
+        harness.script(session_id, ProviderSessionState.FINISHED, detail="done")
+
+        report = harness.engine.tick()
+
+        assert report.sessions_failed == (session_id,)
+        assert harness.store.get_task(task.task_id).status is TaskStatus.IN_PROGRESS
+    finally:
+        harness.close()
 
 
 def test_tick_fails_and_retries_failed_sessions(harness: Harness) -> None:

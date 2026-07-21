@@ -120,9 +120,18 @@ engineering_manager/           The Engineering Manager application.
                                    ConcurrencyLimitedPolicy.
         retry.py                 RetryPolicy ABC, LimitedRetryPolicy,
                                    ExponentialBackoffRetryPolicy.
+        verification.py          VerificationPolicy ABC, NoVerificationPolicy,
+                                   CommandVerificationPolicy (ADR 0019).
         graph.py                 Dependency-graph analysis: cycles, waves, blockages.
         context.py               ContextAssembler: composes session briefs.
         plans.py                 PlanCoordinator: plan lifecycle operations.
+        planning.py              PlanningSessionRunner: one bounded provider
+                                   session for goal decomposition (ADR 0020).
+        planning_decomposition.py
+                                  TaskDraft, parse_decomposition,
+                                   build_planning_instructions.
+        report.py                ProjectReport, build_report, render_markdown:
+                                   Markdown engineering reports from durable state.
         dispatcher.py            Dispatcher: eligibility, dispatch, session lifecycle.
         engine.py                ExecutionEngine: the reconcile-and-advance tick.
 

@@ -26,14 +26,17 @@ now exposed in the CLI. A second adapter (e.g. an HTTP-API provider)
 remains the next pressure test of the contract's provider-agnosticism;
 extend `Provider`/`SessionSpec` additively if it falls short (ADR 0005).
 
-### 2. AI-performed planning
+### 2. AI-performed planning — shipped
 
-Plans are the representation (ADR 0009); decomposition is still a
-human activity. A planning session — any provider asked to break a
-goal into tasks and dependencies, written through the facade — closes
-that gap with no new mechanism. Worth an ADR when it lands: how
-decompositions are reviewed (the plan's DRAFT state is the natural
-gate).
+`manager.plan_from_goal` (ADR 0020) runs a planning session through the
+existing `Provider` contract — `PlanningSessionRunner`
+(`orchestration/planning.py`) drives it to completion synchronously and
+bounded, `parse_decomposition` (`orchestration/planning_decomposition.py`)
+tolerantly turns the output into task drafts — and writes the result
+through `add_plan`/`add_task`/`add_task_dependency`, exactly the "no new
+mechanism" this item anticipated. Decompositions are reviewed exactly as
+anticipated too: the plan lands in `DRAFT`, and `approve_plan` remains
+the only gate to dispatch.
 
 ### 3. Richer assignment and retry policies — partially shipped
 
@@ -69,7 +72,32 @@ queries become useful (ADR 0004 anticipates all three).
 The closing of the loop: a `zenith` project whose plans are Zenith
 milestones, dispatched to providers by the Engineering Manager. No new
 mechanism is expected — this is dogfooding, and the friction it finds
-feeds items 1–4.
+feeds items 1–4. Items 6 and 7 below (verification, reports) are
+exactly the hardening this dogfooding would otherwise discover the hard
+way — landing them first means the first real dogfood run has something
+to trust and something to read afterward.
+
+### 6. A verification gate before NEEDS_REVIEW — shipped
+
+Not originally on this list, but the obstacle it removes was the
+sharpest one to the "walk away for hours" mission: nothing checked a
+provider's `FINISHED` claim before trusting it. `VerificationPolicy`
+(`orchestration/verification.py`, ADR 0019) closes that — the default
+`NoVerificationPolicy` changes nothing; `CommandVerificationPolicy` runs
+a command (a test suite, a linter) before a completion reaches
+`NEEDS_REVIEW`, and a failure re-enters the existing retry loop rather
+than becoming a new outcome kind. `run --verify-command` wires it from
+the CLI.
+
+### 7. Engineering reports — shipped
+
+Also not originally on this list: after a long unattended run, nothing
+composed "what happened" into something a human reads once, start to
+finish — only the CLI's `status`/`log`, or subscribing to the bus.
+`manager.project_report` (`orchestration/report.py`) renders a Markdown
+report from durable state (plans, task breakdown, work needing review,
+blockages, recent attention, session outcomes); `project report
+<id> [--out PATH]` in the CLI.
 
 ## Zenith runtime
 

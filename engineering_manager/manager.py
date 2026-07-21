@@ -35,19 +35,24 @@ from engineering_manager.domain.validation import (
 from engineering_manager.events import (
     AccountAdded,
     AccountRemoved,
+    PlanDecomposed,
     ProjectAdded,
     ProjectStatusChanged,
     TaskAdded,
     TaskDependencyAdded,
     TaskStatusChanged,
 )
-from engineering_manager.exceptions import DomainValidationError
+from engineering_manager.exceptions import DomainValidationError, OrchestrationError
 from engineering_manager.orchestration.dispatcher import SOURCE, Dispatcher
 from engineering_manager.orchestration.engine import ExecutionEngine, TickReport
 from engineering_manager.orchestration.graph import Blockage, blockages, would_create_cycle
+from engineering_manager.orchestration.planning import PlanningSessionRunner
+from engineering_manager.orchestration.planning_decomposition import parse_decomposition
 from engineering_manager.orchestration.plans import PlanCoordinator
 from engineering_manager.orchestration.policy import AssignmentPolicy
+from engineering_manager.orchestration.report import build_report, render_markdown
 from engineering_manager.orchestration.retry import RetryPolicy
+from engineering_manager.orchestration.verification import VerificationPolicy
 from engineering_manager.providers.base import Provider
 from engineering_manager.providers.registry import ProviderRegistry
 from engineering_manager.store.serialization import EventLogEntry
@@ -74,6 +79,7 @@ class EngineeringManager:
         providers: ProviderRegistry | None = None,
         policy: AssignmentPolicy | None = None,
         retry_policy: RetryPolicy | None = None,
+        verification_policy: VerificationPolicy | None = None,
         bus: EventBus | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -89,10 +95,12 @@ class EngineeringManager:
             self.dispatcher,
             self.providers,
             retry_policy=retry_policy,
+            verification_policy=verification_policy,
             bus=self.events,
             logger=self._logger,
         )
         self._plans = PlanCoordinator(store, bus=self.events, logger=self._logger)
+        self._planning = PlanningSessionRunner(self.providers, logger=self._logger)
 
     def close(self) -> None:
         """Close the underlying store."""
@@ -160,11 +168,111 @@ class EngineeringManager:
         """Return managed projects, optionally filtered by status."""
         return self.store.list_projects(status=status)
 
+    def project_report(self, project_id: str) -> str:
+        """Render a Markdown status report for `project_id` from durable state.
+
+        Covers plans, a task-status breakdown, work awaiting review,
+        blocked tasks, recent attention notices, and a session summary
+        — the "what happened while I was away" a human needs after
+        leaving the engine running unattended.
+
+        Raises:
+            ProjectNotFoundError: If `project_id` is not managed.
+        """
+        return render_markdown(build_report(self.store, project_id))
+
     # -- plans -------------------------------------------------------------
 
     def add_plan(self, project_id: str, goal: str, description: str | None = None) -> Plan:
         """Record a high-level goal as a plan in DRAFT."""
         return self._plans.add_plan(project_id, goal, description)
+
+    def set_planning_runner(self, runner: PlanningSessionRunner) -> None:
+        """Replace how `plan_from_goal` runs its provider session."""
+        self._planning = runner
+
+    def plan_from_goal(
+        self,
+        project_id: str,
+        goal: str,
+        *,
+        provider_id: str,
+        account_id: str,
+        description: str | None = None,
+        model: str | None = None,
+    ) -> Plan:
+        """Ask a provider to decompose `goal` into a reviewable plan.
+
+        Records the plan in DRAFT first (so even a failed decomposition
+        leaves an auditable trace), runs one bounded planning session
+        (`PlanningSessionRunner`), parses its output into task drafts,
+        and writes them through the ordinary `add_task`/
+        `add_task_dependency` path — the plan is exactly as reviewable
+        as one a human decomposed by hand, since `approve_plan` is still
+        the only way anything in it becomes eligible for dispatch.
+        Dependency edges the parsed output couldn't honor (a bad index,
+        a would-be cycle) are logged and skipped rather than failing the
+        whole decomposition; a human reviewing the DRAFT plan can add
+        them back.
+
+        Raises:
+            ProjectNotFoundError: If `project_id` is not managed.
+            ProviderNotFoundError: If `provider_id` is not registered.
+            ProviderSessionError: If the provider cannot start the
+                planning session.
+            OrchestrationError: If the session fails, needs a human, times
+                out, its output cannot be parsed, or produces no usable
+                tasks. The plan itself still exists, empty, in DRAFT.
+        """
+        project = self.store.get_project(project_id)
+        plan = self.add_plan(project_id, goal, description)
+        raw_output = self._planning.run(
+            provider_id=provider_id,
+            account_id=account_id,
+            project=project,
+            goal=goal,
+            description=description,
+            model=model,
+        )
+        drafts = parse_decomposition(raw_output)
+        if not drafts:
+            raise OrchestrationError(
+                f"Planning session for plan {plan.plan_id} produced no usable tasks; "
+                "decompose it manually or plan again."
+            )
+        created: dict[int, UUID] = {}
+        for index, draft in enumerate(drafts):
+            task = self.add_task(
+                project_id,
+                draft.title,
+                description=draft.description,
+                priority=draft.priority,
+                plan_id=plan.plan_id,
+            )
+            created[index] = task.task_id
+        for index, draft in enumerate(drafts):
+            for dependency_index in draft.depends_on:
+                if dependency_index == index or dependency_index not in created:
+                    continue
+                try:
+                    self.add_task_dependency(created[index], created[dependency_index])
+                except DomainValidationError as exc:
+                    self._logger.warning(
+                        "Skipped a dependency from planning output for plan %s: %s",
+                        plan.plan_id,
+                        exc,
+                    )
+        self._publish(
+            PlanDecomposed(
+                source=SOURCE,
+                payload={
+                    "plan_id": str(plan.plan_id),
+                    "project_id": project_id,
+                    "task_count": len(created),
+                },
+            )
+        )
+        return plan
 
     def approve_plan(self, plan_id: UUID) -> Plan:
         """Human gate one, in bulk: approve a plan and its DRAFT tasks."""
@@ -390,6 +498,10 @@ class EngineeringManager:
         return self.store.list_accounts(provider_id=provider_id)
 
     # -- execution ---------------------------------------------------------
+
+    def set_verification_policy(self, policy: VerificationPolicy) -> None:
+        """Replace the policy that checks a session's claimed completion."""
+        self.engine.set_verification_policy(policy)
 
     def tick(self) -> TickReport:
         """Advance every session, task, and plan one deterministic step."""

@@ -7,14 +7,16 @@ from pathlib import Path
 import pytest
 
 from engineering_manager.domain.states import ProjectStatus, SessionStatus, TaskStatus
-from engineering_manager.events import TaskStatusChanged
+from engineering_manager.events import PlanDecomposed, TaskStatusChanged
 from engineering_manager.exceptions import (
     DomainValidationError,
     DuplicateEntityError,
+    OrchestrationError,
     ProjectNotFoundError,
     TaskNotFoundError,
 )
 from engineering_manager.manager import EngineeringManager
+from engineering_manager.providers.base import ProviderSessionState, ProviderSessionStatus
 from engineering_manager.providers.in_memory import InMemoryProvider
 from engineering_manager.store.store import Store
 from shared.events.event import Event
@@ -418,3 +420,114 @@ def test_tick_drives_work_end_to_end(manager: EngineeringManager, tmp_path: Path
 
     assert len(report.sessions_started) == 1
     assert manager.get_task(task.task_id).status is TaskStatus.IN_PROGRESS
+
+
+def _script_planning_output(manager: EngineeringManager, detail: str) -> None:
+    """Make the next planning session on the in-memory provider finish with `detail`."""
+    provider = manager.providers.get("in-memory")
+    original_start = provider.start_session
+
+    def start_and_finish(spec: object) -> object:
+        handle = original_start(spec)  # type: ignore[arg-type]
+        provider.script_status(
+            handle, ProviderSessionStatus(state=ProviderSessionState.FINISHED, detail=detail)
+        )
+        return handle
+
+    provider.start_session = start_and_finish  # type: ignore[method-assign]
+
+
+def test_plan_from_goal_creates_draft_tasks_with_dependencies(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    from engineering_manager.domain.states import PlanStatus
+
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "a")
+    _script_planning_output(
+        manager, '[{"title": "Design"}, {"title": "Build", "depends_on": [0]}]'
+    )
+
+    plan = manager.plan_from_goal("zenith", "Ship it", provider_id="in-memory", account_id="a")
+
+    assert plan.status is PlanStatus.DRAFT
+    tasks = {task.title: task for task in manager.plan_tasks(plan.plan_id)}
+    assert set(tasks) == {"Design", "Build"}
+    assert tasks["Build"].depends_on == frozenset({tasks["Design"].task_id})
+    assert all(task.status is TaskStatus.DRAFT for task in tasks.values())
+
+
+def test_plan_from_goal_publishes_plan_decomposed(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "a")
+    _script_planning_output(manager, '[{"title": "Design"}]')
+    received: list[Event] = []
+    manager.events.subscribe(PlanDecomposed, received.append)
+
+    plan = manager.plan_from_goal("zenith", "Ship it", provider_id="in-memory", account_id="a")
+
+    assert len(received) == 1
+    assert received[0].payload == {
+        "plan_id": str(plan.plan_id),
+        "project_id": "zenith",
+        "task_count": 1,
+    }
+
+
+def test_plan_from_goal_skips_dependency_edges_that_would_cycle(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "a")
+    _script_planning_output(
+        manager,
+        '[{"title": "A", "depends_on": [1]}, {"title": "B", "depends_on": [0]}]',
+    )
+
+    plan = manager.plan_from_goal("zenith", "Ship it", provider_id="in-memory", account_id="a")
+
+    tasks = {task.title: task for task in manager.plan_tasks(plan.plan_id)}
+    assert tasks["A"].depends_on == frozenset({tasks["B"].task_id})
+    assert tasks["B"].depends_on == frozenset()  # would have cycled; skipped
+
+
+def test_plan_from_goal_raises_and_leaves_an_empty_draft_plan_on_unparseable_output(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    from engineering_manager.domain.states import PlanStatus
+
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "a")
+    _script_planning_output(manager, "I refuse to produce a plan.")
+
+    with pytest.raises(OrchestrationError):
+        manager.plan_from_goal("zenith", "Ship it", provider_id="in-memory", account_id="a")
+
+    (plan,) = manager.list_plans(project_id="zenith")
+    assert plan.status is PlanStatus.DRAFT
+    assert manager.plan_tasks(plan.plan_id) == []
+
+
+def test_plan_from_goal_raises_on_project_not_found(manager: EngineeringManager) -> None:
+    with pytest.raises(ProjectNotFoundError):
+        manager.plan_from_goal("nope", "Ship it", provider_id="in-memory", account_id="a")
+
+
+def test_project_report_renders_markdown_from_live_state(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    manager.add_project("zenith", "Zenith", tmp_path)
+    task = manager.add_task("zenith", "Write the loader")
+    manager.approve_task(task.task_id)
+
+    report = manager.project_report("zenith")
+
+    assert report.startswith("# Engineering Report: Zenith (zenith)")
+    assert "READY: 1" in report
+
+
+def test_project_report_raises_on_project_not_found(manager: EngineeringManager) -> None:
+    with pytest.raises(ProjectNotFoundError):
+        manager.project_report("nope")

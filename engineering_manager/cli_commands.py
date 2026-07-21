@@ -8,11 +8,17 @@ produces the `argparse.Namespace` this module's `dispatch` acts on.
 from __future__ import annotations
 
 import argparse
+import shlex
 from uuid import UUID
 
 from engineering_manager.domain.states import TaskStatus
 from engineering_manager.manager import EngineeringManager
 from engineering_manager.orchestration.graph import execution_waves
+from engineering_manager.orchestration.planning import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    PlanningSessionRunner,
+)
+from engineering_manager.orchestration.verification import CommandVerificationPolicy
 from engineering_manager.providers.claude_code import ClaudeCodeProvider
 
 
@@ -48,6 +54,13 @@ def _run_project(manager: EngineeringManager, args: argparse.Namespace) -> None:
     elif args.subcommand == "list":
         for project in manager.list_projects():
             print(f"{project.project_id}  {project.status.name}  {project.name}")
+    elif args.subcommand == "report":
+        report = manager.project_report(args.project_id)
+        if args.out:
+            args.out.write_text(report, encoding="utf-8")
+            print(f"Wrote report to {args.out}.")
+        else:
+            print(report)
 
 
 def _run_plan(manager: EngineeringManager, args: argparse.Namespace) -> None:
@@ -55,6 +68,8 @@ def _run_plan(manager: EngineeringManager, args: argparse.Namespace) -> None:
     if args.subcommand == "add":
         plan = manager.add_plan(args.project_id, args.goal, description=args.description)
         print(f"Added plan {plan.plan_id} '{plan.goal}' (DRAFT).")
+    elif args.subcommand == "from-goal":
+        _run_plan_from_goal(manager, args)
     elif args.subcommand == "list":
         for plan in manager.list_plans(project_id=args.project):
             print(f"{plan.plan_id}  {plan.status.name:12}  {plan.goal}")
@@ -66,6 +81,34 @@ def _run_plan(manager: EngineeringManager, args: argparse.Namespace) -> None:
         ]
         plan = action(args.plan_id)
         print(f"Plan {plan.plan_id} is now {plan.status.name}.")
+
+
+def _run_plan_from_goal(manager: EngineeringManager, args: argparse.Namespace) -> None:
+    """Register the Claude Code provider and decompose a goal into a plan."""
+    manager.register_provider(ClaudeCodeProvider(command=(args.claude_command,)))
+    manager.set_planning_runner(
+        PlanningSessionRunner(
+            manager.providers,
+            max_polls=max(1, int(args.timeout_seconds / DEFAULT_POLL_INTERVAL_SECONDS)),
+        )
+    )
+    print(
+        f"Decomposing goal with {args.provider}/{args.account} "
+        f"(up to {args.timeout_seconds:.0f}s)..."
+    )
+    plan = manager.plan_from_goal(
+        args.project_id,
+        args.goal,
+        provider_id=args.provider,
+        account_id=args.account,
+        description=args.description,
+        model=args.model,
+    )
+    tasks = manager.plan_tasks(plan.plan_id)
+    print(f"Plan {plan.plan_id} '{plan.goal}' drafted with {len(tasks)} task(s):")
+    for task in tasks:
+        print(f"  {task.task_id}  p{task.priority}  {task.title}")
+    print(f"Review with `plan show {plan.plan_id}`, then `plan approve {plan.plan_id}`.")
 
 
 def _print_plan(manager: EngineeringManager, plan_id: UUID) -> None:
@@ -130,6 +173,14 @@ def _run_engine(manager: EngineeringManager, args: argparse.Namespace) -> None:
     idles, ticking with nothing eligible to run.
     """
     manager.register_provider(ClaudeCodeProvider(command=(args.claude_command,)))
+    if args.verify_command:
+        manager.set_verification_policy(
+            CommandVerificationPolicy(
+                tuple(shlex.split(args.verify_command)),
+                timeout_seconds=args.verify_timeout,
+            )
+        )
+        print(f"Verifying completions with: {args.verify_command}")
     print(f"Running the execution engine every {args.interval}s. Press Ctrl+C to stop.")
     manager.run(interval_seconds=args.interval, max_ticks=args.max_ticks)
 

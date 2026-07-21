@@ -50,6 +50,15 @@ class PlanStatusChanged(Event):
 
 
 @dataclass(frozen=True)
+class PlanDecomposed(Event):
+    """Emitted when a planning session finishes decomposing a goal into
+    tasks written under a plan.
+
+    Payload: `plan_id`, `project_id`, `task_count`.
+    """
+
+
+@dataclass(frozen=True)
 class TaskAdded(Event):
     """Emitted when a task is created.
 

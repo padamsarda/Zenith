@@ -80,6 +80,12 @@ pytest tests/test_em_store.py -q   # one module while iterating
   `engineering_manager.orchestration.retry.RetryPolicy`; the engine
   needs no changes. Attempt counts derive from session history — never
   store them.
+- **New verification policy**: subclass
+  `engineering_manager.orchestration.verification.VerificationPolicy`
+  (one method, `verify(task, project) -> VerificationResult`); the
+  engine needs no changes. A failure must be reported in the result, not
+  raised — a raising `verify` would crash the tick instead of becoming
+  an ordinary recoverable task failure (ADR 0019).
 - **New EM event**: add the type to `engineering_manager/events.py`,
   publish through the facade/dispatcher/engine `_publish` path so it
   reaches both the event log and the bus, and extend
