@@ -89,5 +89,30 @@ class Memory:
             memory_id=self.memory_id,
         )
 
+    def reinforced(self, at: datetime | None = None) -> Memory:
+        """Return a copy strengthened by having been said again.
+
+        Restating something is evidence it matters, so importance rises
+        by one (capped), and `occurred_at` moves to now — the fact is
+        current as of this moment, not only as of the first time it came
+        up. Used by consolidation instead of storing a second near-
+        identical memory (ADR 0028).
+        """
+        moment = at or utc_now()
+        return Memory(
+            content=self.content,
+            kind=self.kind,
+            importance=min(self.importance + 1, MAX_IMPORTANCE),
+            pinned=self.pinned,
+            tags=self.tags,
+            source=self.source,
+            metadata=dict(self.metadata),
+            occurred_at=moment,
+            created_at=self.created_at,
+            last_accessed_at=moment,
+            access_count=self.access_count,
+            memory_id=self.memory_id,
+        )
+
     def __str__(self) -> str:
         return self.content

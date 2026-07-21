@@ -287,7 +287,7 @@ music," "increase volume," "open VS Code"). Neither is auto-registered,
 following the ADR 0016 precedent exactly.
 
 Closing/switching applications and listing what is running shipped in
-item 9 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
+item 11 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
 display management (named in the product vision, not built — different
 mechanisms again, not a natural extension of either desktop tool), and
 an absolute volume level (needs the Windows Core Audio COM API, which
@@ -333,17 +333,50 @@ departure from every system surveyed, forced by the standard-library-only
 convention, and drawn behind a seam so an embedding backend is a new
 `MemoryStore` and nothing else.
 
-Still open, and recorded as deliberate limitations rather than
-oversights: capture is **verbatim, not summarized** (an extraction pass
-costs a provider call per exchange and can invent detail); there is **no
-reconciliation**, so memories accumulate and can contradict each other
-with recency and importance deciding which surfaces (Mem0's
-ADD/UPDATE/DELETE/NOOP step is the model to follow); and there is **no
-pruning, expiry, or review surface** — `MemoryTool.forget` is the only
-correction path. Weights and half-life are constructor arguments, not
-configuration, until daily use shows the defaults are wrong.
+Reconciliation and pruning shipped in item 9 below (ADR 0028). Still
+open, and recorded as a deliberate limitation rather than an oversight:
+capture is **verbatim, not summarized** — an extraction pass costs a
+provider call per exchange and can invent detail the user never said.
+Weights and half-life are constructor arguments, not configuration,
+until daily use shows the defaults are wrong.
 
-### 9. App control: list, switch, close — shipped
+### 9. Memory consolidation — shipped
+
+`runtime/memory/consolidation.py` (ADR 0028) closes the failure mode
+ADR 0027 knowingly left open: automatic capture writing something on
+every substantive turn is what makes memory work unprompted, and also
+what makes it degrade. A `ConsolidationPolicy` seam (write-side, mirroring
+`MemoryRetrievalPolicy` read-side) decides ADD / REINFORCE / SUPERSEDE
+before every write, so repeating a fact strengthens it rather than
+duplicating it, and an explicit correction actually replaces what it
+corrects. `MemoryConsolidator.prune` deletes only memories that are
+unpinned *and* unimportant *and* never once recalled *and* old —
+exposed through `MemoryTool`'s `prune`, behind `ConfirmationHook`, never
+automatic.
+
+Deliberately conservative: supersession requires an explicit correction
+marker, never similarity alone, because reinforcing wrongly costs
+nothing while superseding wrongly destroys a real memory. Semantic
+contradiction with no marker ("the battery is LiFePO4", stated flatly
+after "the battery is lithium") is therefore **not** detected — that
+needs real semantics, and is the natural home for a model-assisted
+`ConsolidationPolicy` behind the same seam, where the cost and risk are
+opted into rather than paid by default.
+
+### 10. Reflection and synthesis — next
+
+The remaining half of what the memory literature calls consolidation:
+Stanford's Generative Agents periodically synthesize clusters of related
+memories into higher-level insights ("I have asked about CubeSat power
+budgets eleven times → the power subsystem is my current focus"), which
+is what lets an assistant answer questions no single stored memory
+covers. Everything needed is in place — `MemoryStore.list`, the
+`ConsolidationPolicy` seam, and a provider — but unlike everything
+shipped so far this genuinely requires model calls, so it needs a
+decision about when they run (on a schedule, at session end, on demand)
+and what they cost.
+
+### 11. App control: list, switch, close — shipped
 
 `AppControlTool` (`app_control`, `runtime/tools/app_control.py`, ADR
 0026) is `AppLauncherTool`'s complement: `list` (every visible window's

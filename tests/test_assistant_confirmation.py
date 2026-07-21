@@ -91,6 +91,28 @@ def test_app_control_close_is_gated() -> None:
     assert confirmer.asked == ["close application 'spotify'"]
 
 
+@pytest.mark.parametrize("operation", ["forget", "prune"])
+def test_destructive_memory_operations_are_gated(operation: str) -> None:
+    confirmer = RecordingConfirmer(answer=True)
+    hook = ConfirmationHook(confirmer=confirmer)
+    call = ToolCall(tool_id="memory", arguments={"operation": operation})
+
+    hook.before_tool(make_request(), call, make_application_context())
+
+    assert confirmer.asked == [f"{operation} from memory"]
+
+
+@pytest.mark.parametrize("operation", ["remember", "search"])
+def test_non_destructive_memory_operations_are_not_gated(operation: str) -> None:
+    confirmer = RecordingConfirmer(answer=False)
+    hook = ConfirmationHook(confirmer=confirmer)
+    call = ToolCall(tool_id="memory", arguments={"operation": operation, "content": "x"})
+
+    hook.before_tool(make_request(), call, make_application_context())
+
+    assert confirmer.asked == []
+
+
 @pytest.mark.parametrize("operation", ["list", "switch"])
 def test_app_control_read_and_switch_are_not_gated(operation: str) -> None:
     confirmer = RecordingConfirmer(answer=False)

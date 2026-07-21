@@ -121,8 +121,12 @@ def test_a_failing_store_does_not_propagate() -> None:
 
         def get(self, memory_id): ...  # type: ignore[no-untyped-def]
         def has(self, memory_id): ...  # type: ignore[no-untyped-def]
+        def update(self, memory, application_context): ...  # type: ignore[no-untyped-def]
         def forget(self, memory_id, application_context): ...  # type: ignore[no-untyped-def]
-        def search(self, query, *, window=None, limit=50): ...  # type: ignore[no-untyped-def]
+
+        def search(self, query, *, window=None, limit=50):  # type: ignore[no-untyped-def]
+            return ()
+
         def touch(self, memories, application_context): ...  # type: ignore[no-untyped-def]
         def list(self): ...  # type: ignore[no-untyped-def]
 

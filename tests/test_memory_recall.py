@@ -119,6 +119,9 @@ def test_recall_never_raises_when_the_store_fails() -> None:
         def has(self, memory_id):  # type: ignore[no-untyped-def]
             raise RuntimeError("boom")
 
+        def update(self, memory, application_context):  # type: ignore[no-untyped-def]
+            raise RuntimeError("boom")
+
         def forget(self, memory_id, application_context):  # type: ignore[no-untyped-def]
             raise RuntimeError("boom")
 

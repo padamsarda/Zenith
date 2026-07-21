@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
+
+from shared.utils.time_utils import utc_now
 
 from configs.config import Config
 from runtime.commands.context import CommandContext
@@ -150,6 +153,78 @@ def test_forget_unknown_id_raises() -> None:
 def test_forget_malformed_id_raises() -> None:
     with pytest.raises(ToolExecutionError):
         MemoryTool().invoke(make_context(), {"operation": "forget", "memory_id": "not-a-uuid"})
+
+
+# --- consolidation through the tool ----------------------------------------------------------------
+
+
+def test_remembering_the_same_thing_twice_reinforces_instead_of_duplicating() -> None:
+    context = make_context()
+    tool = MemoryTool()
+    text = "The CubeSat battery is an 18650 lithium pack"
+    tool.invoke(context, {"operation": "remember", "content": text})
+
+    result = tool.invoke(context, {"operation": "remember", "content": text})
+
+    assert len(context.application_context.memory.list()) == 1
+    assert "reinforced" in str(result).lower()
+
+
+def test_an_explicit_correction_replaces_the_old_fact() -> None:
+    context = make_context()
+    tool = MemoryTool()
+    tool.invoke(
+        context,
+        {"operation": "remember", "content": "The CubeSat battery is an 18650 lithium pack"},
+    )
+
+    result = tool.invoke(
+        context,
+        {"operation": "remember", "content": "actually the CubeSat battery is LiFePO4 now"},
+    )
+
+    stored = context.application_context.memory.list()
+    assert len(stored) == 1
+    assert "LiFePO4" in stored[0].content
+    assert "was:" in str(result)
+
+
+# --- prune ----------------------------------------------------------------
+
+
+def test_prune_removes_old_unused_trivia() -> None:
+    context = make_context()
+    old = utc_now() - timedelta(days=200)
+    context.application_context.memory.remember(
+        Memory(
+            content="old unused trivia",
+            importance=2,
+            occurred_at=old,
+            created_at=old,
+            last_accessed_at=old,
+        ),
+        context.application_context,
+    )
+
+    result = MemoryTool().invoke(context, {"operation": "prune"})
+
+    assert context.application_context.memory.list() == []
+    assert "Pruned 1" in str(result)
+
+
+def test_prune_keeps_pinned_memories() -> None:
+    context = make_context()
+    tool = MemoryTool()
+    tool.invoke(context, {"operation": "remember", "content": "My student ID is f20250775"})
+
+    tool.invoke(context, {"operation": "prune", "older_than_days": 0.001})
+
+    assert len(context.application_context.memory.list()) == 1
+
+
+def test_prune_rejects_a_non_positive_window() -> None:
+    with pytest.raises(ToolExecutionError):
+        MemoryTool().invoke(make_context(), {"operation": "prune", "older_than_days": 0})
 
 
 # --- unknown operation ----------------------------------------------------------------

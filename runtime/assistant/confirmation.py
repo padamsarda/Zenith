@@ -24,9 +24,13 @@ DEFAULT_LOGGER_NAME = "zenith.assistant.confirmation"
 # `app_control`'s `close` (ADR 0024's follow-up) force-terminates a
 # process and can lose unsaved work the same way `filesystem.delete`
 # loses a file; `list`/`switch` are read-only/reversible and stay clear.
+# `memory`'s `prune` deletes many memories in one call, and `forget`
+# deletes one — both irreversible, both worth a checkpoint. `remember`
+# and `search` add or read and stay clear (ADR 0028).
 _ALWAYS_GATED_TOOL_IDS = frozenset({"shell"})
 _GATED_FILESYSTEM_OPERATIONS = frozenset({"write", "delete"})
 _GATED_APP_CONTROL_OPERATIONS = frozenset({"close"})
+_GATED_MEMORY_OPERATIONS = frozenset({"forget", "prune"})
 
 Confirmer = Callable[[str], bool]
 
@@ -50,10 +54,11 @@ class ConfirmationHook(AssistantHook):
     may run *at all* for a deployment; this decides whether *this
     particular call* may proceed right now, for the subset of calls that
     can destroy something irrecoverably (`shell`'s arbitrary commands,
-    `filesystem`'s `write`/`delete`, `app_control`'s `close`). Everything
-    else — including `AppLauncherTool`, and `app_control`'s own
-    `list`/`switch`, and `MediaControlTool`, ADR 0024 — is unaffected,
-    since none of those can lose data.
+    `filesystem`'s `write`/`delete`, `app_control`'s `close`, and
+    `memory`'s `forget`/`prune`). Everything else — including
+    `AppLauncherTool`, `app_control`'s own `list`/`switch`,
+    `MediaControlTool` (ADR 0024), and `memory`'s `remember`/`search` —
+    is unaffected, since none of those can lose data.
 
     Declining raises `ToolCallVetoedError`, which `ToolCallRunner`
     records as a denial the provider sees on its next turn — the request
@@ -115,5 +120,10 @@ class ConfirmationHook(AssistantHook):
             if operation in _GATED_APP_CONTROL_OPERATIONS:
                 app_name = call.arguments.get("app_name", "")
                 return f"close application {app_name!r}"
+
+        if call.tool_id == "memory":
+            operation = call.arguments.get("operation")
+            if operation in _GATED_MEMORY_OPERATIONS:
+                return f"{operation} from memory"
 
         return None

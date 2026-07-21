@@ -140,6 +140,16 @@ pytest tests/test_em_store.py -q   # one module while iterating
   They are deliberately explicit rather than an LLM judgment: rules cost
   nothing per turn and are correctable by a human. An explicit
   "remember this" must always win over every other heuristic.
+- **New memory consolidation rule**: subclass
+  `runtime.memory.consolidation.ConsolidationPolicy` (one method,
+  `decide`); the consolidator, store, hook, and tool need no changes.
+  **Never write through `MemoryStore.remember` directly** — go through
+  `MemoryConsolidator.store`, or a new writer silently reintroduces the
+  duplicate accumulation ADR 0028 exists to prevent. Be asymmetric about
+  risk the way `LexicalConsolidationPolicy` is: reinforcing wrongly
+  costs nothing, superseding wrongly destroys a real memory, so
+  supersession must require an explicit correction signal and never
+  similarity alone.
 - **Anything touching memory must not be able to fail a request.**
   `MemoryRecaller.recall` and `MemoryCaptureHook` both catch, log, and
   continue — a broken memory subsystem yields an assistant with no

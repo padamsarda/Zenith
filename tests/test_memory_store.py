@@ -18,7 +18,7 @@ import pytest
 from configs.config import Config
 from runtime.context import ApplicationContext
 from runtime.exceptions import MemoryNotFoundError, MemoryValidationError
-from runtime.memory.events import MemoryForgotten, MemoryRemembered
+from runtime.memory.events import MemoryForgotten, MemoryRemembered, MemoryUpdated
 from runtime.memory.in_memory_store import InMemoryMemoryStore
 from runtime.memory.memory import Memory, MemoryKind
 from runtime.memory.sqlite.store import SQLiteMemoryStore
@@ -96,6 +96,71 @@ def test_has_is_false_for_unknown(store: MemoryStore) -> None:
     from shared.utils.uuid_utils import generate_id
 
     assert store.has(generate_id()) is False
+
+
+# --- update ----------------------------------------------------------------
+
+
+def test_update_replaces_the_stored_memory(store: MemoryStore) -> None:
+    context = make_context()
+    memory = store.remember(make_memory("original", importance=5), context)
+
+    store.update(memory.reinforced(NOW + timedelta(days=1)), context)
+
+    refreshed = store.get(memory.memory_id)
+    assert refreshed.importance == 6
+    assert refreshed.occurred_at == NOW + timedelta(days=1)
+
+
+def test_update_emits_event(store: MemoryStore) -> None:
+    context = make_context()
+    memory = store.remember(make_memory(), context)
+    received: list[Event] = []
+    context.events.subscribe(MemoryUpdated, received.append)
+
+    store.update(memory.reinforced(), context)
+
+    assert len(received) == 1
+
+
+def test_update_of_unknown_memory_raises(store: MemoryStore) -> None:
+    with pytest.raises(MemoryNotFoundError):
+        store.update(make_memory("never stored"), make_context())
+
+
+def test_update_rejects_an_invalid_memory(store: MemoryStore) -> None:
+    context = make_context()
+    memory = store.remember(make_memory(), context)
+    broken = Memory(
+        content="fine",
+        importance=99,
+        memory_id=memory.memory_id,
+        occurred_at=NOW,
+        created_at=NOW,
+        last_accessed_at=NOW,
+    )
+
+    with pytest.raises(MemoryValidationError):
+        store.update(broken, context)
+
+
+def test_updated_content_is_searchable(store: MemoryStore) -> None:
+    # The FTS index must follow an update, or search silently returns
+    # stale results for the durable backend.
+    context = make_context()
+    memory = store.remember(make_memory("the antenna is a dipole"), context)
+    replaced = Memory(
+        content="the antenna is a monopole whip",
+        memory_id=memory.memory_id,
+        occurred_at=NOW,
+        created_at=NOW,
+        last_accessed_at=NOW,
+    )
+
+    store.update(replaced, context)
+
+    assert store.search("dipole") == ()
+    assert len(store.search("monopole whip")) == 1
 
 
 # --- forget ----------------------------------------------------------------

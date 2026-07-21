@@ -69,6 +69,48 @@ def overlap_relevance(query_tokens: tuple[str, ...], content: str) -> float:
     return min(matched / len(set(query_tokens)), 1.0)
 
 
+def similarity(left: str, right: str) -> float:
+    """Score how alike two texts are, symmetrically, in `[0, 1]`.
+
+    Jaccard overlap of their content words. Unlike `overlap_relevance`,
+    which asks the directional question "does this content answer this
+    query", this asks "are these two statements the same thing" — and
+    that has to be symmetric, or whether two memories were judged
+    duplicates would depend on which one happened to be written first.
+
+    Two texts with no content words (only stop words) are treated as
+    dissimilar rather than identical: there is no evidence they say the
+    same thing, and merging on that basis would silently lose one.
+    """
+    left_tokens = set(tokenize(left))
+    right_tokens = set(tokenize(right))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    intersection = len(left_tokens & right_tokens)
+    union = len(left_tokens | right_tokens)
+    return intersection / union if union else 0.0
+
+
+def subject_overlap(left: str, right: str) -> float:
+    """Score whether two texts are *about* the same thing, in `[0, 1]`.
+
+    The overlap coefficient — shared content words over the smaller of
+    the two vocabularies — rather than `similarity`'s Jaccard. The
+    distinction matters for corrections: "actually the battery is
+    LiFePO4 now" and "the battery is an 18650 lithium pack" are clearly
+    about the same subject, yet score only 0.25 by Jaccard, because a
+    correction *by definition* introduces words the original lacked and
+    Jaccard charges the whole union for them. Overlap asks the question
+    actually being posed — do these concern the same thing — and is not
+    punished for the new statement saying something new.
+    """
+    left_tokens = set(tokenize(left))
+    right_tokens = set(tokenize(right))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens))
+
+
 def normalize_scores(raw: list[float]) -> list[float]:
     """Min-max normalize `raw` into `[0, 1]`.
 

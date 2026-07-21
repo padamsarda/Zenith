@@ -55,6 +55,20 @@ class MemoryStore(ABC):
         """Return True if a memory with `memory_id` is stored."""
 
     @abstractmethod
+    def update(self, memory: Memory, application_context: ApplicationContext) -> None:
+        """Replace the stored memory sharing `memory`'s ID.
+
+        Emits `MemoryUpdated`. Used by consolidation to strengthen an
+        existing memory rather than store a near-duplicate beside it
+        (ADR 0028) — deliberately narrow, since memories are otherwise
+        immutable and a correction is a `forget` plus a `remember`.
+
+        Raises:
+            MemoryNotFoundError: If no memory with that ID is stored.
+            MemoryValidationError: If `memory` fails validation.
+        """
+
+    @abstractmethod
     def forget(self, memory_id: UUID, application_context: ApplicationContext) -> None:
         """Delete the memory with `memory_id`.
 

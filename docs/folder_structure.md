@@ -57,6 +57,9 @@ runtime/                       The Zenith assistant runtime.
         matching.py              Tokenization and lexical relevance helpers.
         temporal.py              TimeWindow, TemporalQuery, relative-time resolution.
         salience.py              What is worth remembering, and how much.
+        consolidation.py         ConsolidationPolicy ABC,
+                                   LexicalConsolidationPolicy, MemoryConsolidator:
+                                   merging repeats, corrections, pruning (ADR 0028).
         retrieval.py             MemoryRetrievalPolicy ABC,
                                    RecencyImportanceRelevancePolicy, ScoredMemory.
         recall.py                MemoryRecaller, render_memories, describe_age.

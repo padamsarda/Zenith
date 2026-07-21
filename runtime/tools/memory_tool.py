@@ -9,16 +9,24 @@ from uuid import UUID
 
 from runtime.capabilities.tool import Tool, ToolParameter
 from runtime.exceptions import MemoryNotFoundError, ToolExecutionError
+from runtime.memory.consolidation import ConsolidationAction, MemoryConsolidator
 from runtime.memory.memory import MAX_IMPORTANCE, MIN_IMPORTANCE, Memory, MemoryKind
 from runtime.memory.recall import MemoryRecaller, describe_age
-from runtime.tools.arguments import optional_bool, optional_int, optional_str, require_str
+from runtime.tools.arguments import (
+    optional_bool,
+    optional_float,
+    optional_int,
+    optional_str,
+    require_str,
+)
 from shared.utils.time_utils import utc_now
 
 if TYPE_CHECKING:
     from runtime.commands.context import CommandContext
 
 DEFAULT_LOGGER_NAME = "zenith.tools.memory"
-OPERATIONS = ("remember", "search", "forget")
+OPERATIONS = ("remember", "search", "forget", "prune")
+DEFAULT_PRUNE_DAYS = 90.0
 
 
 @dataclass(frozen=True)
@@ -55,9 +63,11 @@ class MemoryTool(Tool):
         self,
         *,
         recaller: MemoryRecaller | None = None,
+        consolidator: MemoryConsolidator | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._recaller = recaller or MemoryRecaller(recall_limit=10)
+        self._consolidator = consolidator or MemoryConsolidator()
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
 
     @property
@@ -118,6 +128,15 @@ class MemoryTool(Tool):
                 description="For 'forget': the ID of the memory to delete.",
                 required=False,
             ),
+            ToolParameter(
+                name="older_than_days",
+                description=(
+                    "For 'prune': only consider memories older than this. "
+                    f"Defaults to {int(DEFAULT_PRUNE_DAYS)}."
+                ),
+                required=False,
+                type="number",
+            ),
         )
 
     def invoke(self, context: CommandContext, arguments: dict[str, Any]) -> MemoryToolResult:
@@ -135,6 +154,8 @@ class MemoryTool(Tool):
             return self._search(context, arguments)
         if operation == "forget":
             return self._forget(context, arguments)
+        if operation == "prune":
+            return self._prune(context, arguments)
         raise ToolExecutionError(
             f"Unknown memory operation {operation!r}; expected one of {OPERATIONS}."
         )
@@ -155,12 +176,38 @@ class MemoryTool(Tool):
             pinned=optional_bool(arguments, "pinned", default=True),
             source="tool",
         )
-        stored = context.application_context.memory.remember(
-            memory, context.application_context
+        decision = self._consolidator.store(memory, context.application_context)
+        self._logger.info("Remembered (%s): %s", decision.action.name.lower(), content)
+
+        if decision.action is ConsolidationAction.REINFORCE:
+            return MemoryToolResult(
+                operation="remember",
+                message=f"Already knew that; reinforced it: {decision.existing}",
+            )
+        if decision.action is ConsolidationAction.SUPERSEDE:
+            return MemoryToolResult(
+                operation="remember",
+                message=f"Updated (was: {decision.existing}). Now: {content}",
+            )
+        return MemoryToolResult(operation="remember", message=f"Remembered: {content}")
+
+    def _prune(self, context: CommandContext, arguments: dict[str, Any]) -> MemoryToolResult:
+        older_than_days = optional_float(
+            arguments, "older_than_days", default=DEFAULT_PRUNE_DAYS
         )
-        self._logger.info("Remembered: %s", content)
+        if older_than_days <= 0:
+            raise ToolExecutionError(
+                f"'older_than_days' must be positive, got {older_than_days}."
+            )
+
+        pruned = self._consolidator.prune(
+            context.application_context, older_than_days=older_than_days
+        )
+        noun = "memory" if len(pruned) == 1 else "memories"
         return MemoryToolResult(
-            operation="remember", message=f"Remembered: {stored.content}"
+            operation="prune",
+            message=f"Pruned {len(pruned)} unused {noun} older than {older_than_days:g} days.",
+            entries=tuple(memory.content for memory in pruned),
         )
 
     def _search(self, context: CommandContext, arguments: dict[str, Any]) -> MemoryToolResult:

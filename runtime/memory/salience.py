@@ -60,6 +60,28 @@ PREFERENCE_MARKERS: tuple[str, ...] = (
     "please never",
 )
 
+# Phrasings that mark a *correction* of something previously said, as
+# opposed to a new fact. These are the only signal on which consolidation
+# will replace an existing memory rather than keep both — deleting a real
+# memory because two statements merely looked similar is far worse than
+# keeping a stale one alongside its replacement (ADR 0028).
+CORRECTION_MARKERS: tuple[str, ...] = (
+    "actually",
+    "correction",
+    "i was wrong",
+    "that's wrong",
+    "thats wrong",
+    "no longer",
+    "not anymore",
+    "instead of",
+    "scratch that",
+    "ignore what i said",
+    "i meant",
+    "changed to",
+    "we switched",
+    "update that",
+)
+
 TASK_MARKERS: tuple[str, ...] = (
     "i need to",
     "i have to",
@@ -94,6 +116,12 @@ def has_explicit_marker(text: str) -> bool:
     """Return whether `text` explicitly asks for something to be remembered."""
     lowered = text.lower()
     return any(marker in lowered for marker in EXPLICIT_MARKERS)
+
+
+def has_correction_marker(text: str) -> bool:
+    """Return whether `text` explicitly corrects something said earlier."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in CORRECTION_MARKERS)
 
 
 def is_trivial(text: str) -> bool:

@@ -142,6 +142,37 @@ def test_recalled_memories_carry_how_long_ago_they_were() -> None:
     assert "yesterday" in provider.briefs[-1].instructions
 
 
+def test_repeating_yourself_does_not_fill_memory_with_duplicates() -> None:
+    # The failure consolidation exists to prevent: over daily use, the
+    # same fact stated repeatedly would otherwise crowd out everything
+    # else in the brief.
+    context = make_context()
+    install_provider(context, ["Noted."] * 4)
+    conversation = context.conversations.create(context, title="session")
+
+    for _ in range(4):
+        say(context, conversation.conversation_id, "The CubeSat battery is an 18650 lithium pack")
+
+    stored = context.memory.list()
+    assert len(stored) == 1
+    assert stored[0].importance > 5  # reinforced each time it was repeated
+
+
+def test_correcting_yourself_replaces_the_old_fact_in_the_brief() -> None:
+    context = make_context()
+    provider = install_provider(context, ["Noted.", "Understood.", "It is LiFePO4."])
+    conversation = context.conversations.create(context, title="session")
+
+    say(context, conversation.conversation_id, "The CubeSat battery is an 18650 lithium pack")
+    say(context, conversation.conversation_id, "actually the CubeSat battery is LiFePO4 now")
+    say(context, conversation.conversation_id, "what battery does the cubesat use")
+
+    instructions = provider.briefs[-1].instructions
+    assert instructions is not None
+    assert "LiFePO4" in instructions
+    assert "18650" not in instructions
+
+
 def test_memory_survives_a_restart_with_the_durable_store(tmp_path: Path) -> None:
     path = tmp_path / "memory.db"
 

@@ -21,6 +21,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from runtime.assistant.hooks import AssistantHook
+from runtime.memory.consolidation import MemoryConsolidator
 from runtime.memory.memory import Memory
 from runtime.memory.salience import classify, has_explicit_marker, is_trivial, score_importance
 
@@ -46,7 +47,22 @@ class MemoryCaptureHook(AssistantHook):
     behind this same hook.
     """
 
-    def __init__(self, *, logger: logging.Logger | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        consolidator: MemoryConsolidator | None = None,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        """Create the hook.
+
+        Args:
+            consolidator: How captured memories are written. Goes through
+                a `MemoryConsolidator` rather than the store directly so
+                repeated statements strengthen what is already known
+                instead of accumulating near-duplicates (ADR 0028).
+            logger: Defaults to a module logger.
+        """
+        self._consolidator = consolidator or MemoryConsolidator()
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
 
     def after_request(
@@ -80,8 +96,10 @@ class MemoryCaptureHook(AssistantHook):
             metadata={"conversation_id": str(request.conversation_id)},
         )
         try:
-            application_context.memory.remember(memory, application_context)
+            decision = self._consolidator.store(memory, application_context)
         except Exception:
             self._logger.warning("Failed to capture memory.", exc_info=True)
             return
-        self._logger.debug("Captured %s memory: %s", kind.name.lower(), text)
+        self._logger.debug(
+            "Captured %s memory (%s): %s", kind.name.lower(), decision.action.name.lower(), text
+        )

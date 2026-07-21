@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from runtime.exceptions import MemoryNotFoundError, MemoryStoreError
-from runtime.memory.events import MemoryForgotten, MemoryRemembered
+from runtime.memory.events import MemoryForgotten, MemoryRemembered, MemoryUpdated
 from runtime.memory.matching import normalize_scores, tokenize
 from runtime.memory.retrieval import MemoryCandidate
 from runtime.memory.sqlite.database import open_database
@@ -94,6 +94,31 @@ class SQLiteMemoryStore(MemoryStore):
             "SELECT 1 FROM memories WHERE memory_id = ?", (str(memory_id),)
         ).fetchone()
         return row is not None
+
+    def update(self, memory: Memory, application_context: ApplicationContext) -> None:
+        self.get(memory.memory_id)
+        validate_memory(memory)
+        row = memory_to_row(memory)
+        assignments = ", ".join(
+            f"{column} = :{column}" for column in row if column != "memory_id"
+        )
+        try:
+            with self._connection:
+                self._connection.execute(
+                    f"UPDATE memories SET {assignments} WHERE memory_id = :memory_id", row
+                )
+        except sqlite3.Error as exc:
+            raise MemoryStoreError(f"Failed to update memory: {exc}") from exc
+
+        application_context.events.emit(
+            MemoryUpdated(
+                source=SOURCE,
+                payload={
+                    "memory_id": str(memory.memory_id),
+                    "importance": memory.importance,
+                },
+            )
+        )
 
     def forget(self, memory_id: UUID, application_context: ApplicationContext) -> None:
         self.get(memory_id)

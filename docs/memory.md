@@ -14,7 +14,9 @@ For why it is built this way — and what was surveyed first — see
 user says something
   -> MemoryCaptureHook      after_request: is this worth keeping?
        └─ salience rules     skip trivia, classify, weight, pin
-  -> MemoryStore.remember    durable, announced on the EventBus
+  -> MemoryConsolidator      new, a repeat, or a correction?
+       └─ ConsolidationPolicy   ADD / REINFORCE / SUPERSEDE
+  -> MemoryStore             durable, announced on the EventBus
 
 user asks something
   -> AssistantContextAssembler   composing the brief, every turn
@@ -64,11 +66,16 @@ which the store updates on recall. A correction is a new memory, or a
 store.remember(memory, context)    # -> Memory, emits MemoryRemembered
 store.get(memory_id)               # -> Memory, raises MemoryNotFoundError
 store.has(memory_id)               # -> bool
+store.update(memory, context)      # replace by ID, emits MemoryUpdated
 store.forget(memory_id, context)   # emits MemoryForgotten
 store.search(query, window=..., limit=...)   # -> tuple[MemoryCandidate, ...]
 store.touch(memories, context)     # record a recall
 store.list()                       # -> list[Memory], newest first
 ```
+
+Write through `MemoryConsolidator.store`, not `remember` directly — see
+[Consolidation](#consolidation) below. `update` exists for the narrow
+mutation reinforcement needs; memories are otherwise immutable.
 
 Two implementations (mirroring `ConversationStore`, ADR 0018):
 
@@ -188,15 +195,69 @@ intended, and recording it would record a misunderstanding.
 ### Limitations worth knowing
 
 - **Capture is verbatim**, not summarized. Cheap, deterministic, and
-  never wrong about what was said — but it does not merge related facts
-  or rewrite them into cleaner statements.
-- **There is no reconciliation.** Memories accumulate and can contradict
-  each other; recency and importance decide which surfaces. Nothing
-  detects that a new memory supersedes an old one.
-- **Everything non-trivial is stored.** That is what makes it work
-  unprompted, and it means the store grows with use and keeps whatever
-  was said. `MemoryTool`'s `forget` is the correction path; there is no
-  expiry, pruning, or review surface.
+  never wrong about what was said — but it does not rewrite statements
+  into cleaner ones or synthesize higher-level insights across many
+  memories.
+- **Contradiction without a marker is not detected.** See
+  [Consolidation](#consolidation): stating a replacement fact flatly,
+  with no "actually" or "no longer", leaves both stored.
+
+## Consolidation
+
+`runtime/memory/consolidation.py`, ADR 0028. Applied to **every** write,
+before it reaches the store, so automatic capture does not slowly fill
+the store with near-duplicates and stale facts.
+
+| Action | When | Effect |
+|---|---|---|
+| `ADD` | Genuinely new | Stored normally. |
+| `REINFORCE` | Statement similarity ≥ 0.85 | No new memory. The existing one's importance rises by one (capped at 10) and its `occurred_at` moves to now. |
+| `SUPERSEDE` | Explicit correction marker **and** subject overlap ≥ 0.35 | The old memory is deleted, the new one stored. |
+
+So repeating yourself **strengthens** what Zeni knows rather than
+cluttering it, and correcting yourself actually corrects.
+
+**The two conditions use different measures on purpose.** Reinforcement
+asks "is this the same statement?" (Jaccard `similarity`). Supersession
+asks "is this about the same thing?" (`subject_overlap`, the overlap
+coefficient). A correction by definition introduces new words, and
+Jaccard charges the whole union for them — "actually the battery is
+LiFePO4 now" scores only 0.25 against the fact it corrects, below any
+safe threshold, while subject overlap scores 0.4.
+
+**Deliberately asymmetric about risk.** Reinforcing wrongly costs
+nothing; superseding wrongly destroys a real memory. So supersession
+*never* fires on similarity alone — it requires an explicit correction
+marker ("actually", "no longer", "we switched", "I meant", "scratch
+that"). Two similar-but-different facts are always both kept.
+
+**What this does not do:** semantic contradiction with no marker. "The
+battery is lithium" followed by a flat "the battery is LiFePO4" leaves
+both stored, with recency and importance deciding which surfaces.
+Detecting that needs real semantics; guessing with lexical rules would
+delete real memories on coincidence. A model-assisted
+`ConsolidationPolicy` is the place for it.
+
+Consolidation **never fails a write**: a raising policy or a failing
+search falls back to storing the memory plainly, since an
+unconsolidated memory is a far smaller problem than a lost one.
+
+### Pruning
+
+`MemoryConsolidator.prune` deletes a memory only when **all four** hold:
+
+- not `pinned`,
+- `importance` at or below a threshold (4 by default),
+- `access_count == 0` — never once recalled,
+- older than `older_than_days` (90 by default).
+
+Requiring all four is what makes it safe to offer at all: anything
+deliberately committed, rated important, or that has ever proven useful
+is out of reach by construction.
+
+**Never automatic.** Deleting memories is exactly the kind of thing that
+must be asked for, so it runs only via `MemoryTool`'s `prune`, itself
+behind `ConfirmationHook`.
 
 ## MemoryTool
 
@@ -204,17 +265,19 @@ intended, and recording it would record a misunderstanding.
 normally reaches a conversation — recall is automatic. This covers what
 automatic recall cannot:
 
-| Operation | Purpose |
-|---|---|
-| `remember` | Deliberately commit a fact. Pins and maxes importance by default. |
-| `search` | Look further back than the handful of entries in a brief. |
-| `forget` | Delete something wrong, by `memory_id`. |
+| Operation | Purpose | Confirmed? |
+|---|---|---|
+| `remember` | Deliberately commit a fact. Pins and maxes importance by default. Goes through consolidation, so restating reinforces. | no |
+| `search` | Look further back than the handful of entries in a brief. | no |
+| `forget` | Delete something wrong, by `memory_id`. | **yes** |
+| `prune` | Bulk-delete old, unused, unimportant, unpinned memories. | **yes** |
 
 ## Events
 
 All with `source="memory_store"`:
 
 - `MemoryRemembered` — `memory_id`, `kind`, `importance`, `pinned`.
+- `MemoryUpdated` — `memory_id`, `importance`.
 - `MemoryForgotten` — `memory_id`.
 - `MemoriesRecalled` — `query`, `count`, `window`.
 
@@ -238,6 +301,8 @@ revision probe.
 | To… | Do this |
 |---|---|
 | Change what is recalled | Subclass `MemoryRetrievalPolicy`, pass to `MemoryRecaller`. |
+| Change how repeats and corrections merge | Subclass `ConsolidationPolicy`, pass to `MemoryConsolidator`. |
 | Change how text is matched (e.g. embeddings) | Implement `MemoryStore`; scoring is unaffected. |
 | Change what is captured | Subclass `MemoryCaptureHook`, or replace the salience rules. |
 | Understand a recall | Read `ScoredMemory`'s components, or subscribe to `MemoriesRecalled`. |
+| Understand a merge | Read the returned `ConsolidationDecision` (action, matched memory, score). |

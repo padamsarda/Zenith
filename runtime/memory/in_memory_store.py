@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from runtime.exceptions import MemoryNotFoundError
-from runtime.memory.events import MemoryForgotten, MemoryRemembered
+from runtime.memory.events import MemoryForgotten, MemoryRemembered, MemoryUpdated
 from runtime.memory.matching import normalize_scores, overlap_relevance, tokenize
 from runtime.memory.retrieval import MemoryCandidate
 from runtime.memory.store import SOURCE, MemoryStore
@@ -57,6 +57,20 @@ class InMemoryMemoryStore(MemoryStore):
 
     def has(self, memory_id: UUID) -> bool:
         return memory_id in self._memories
+
+    def update(self, memory: Memory, application_context: ApplicationContext) -> None:
+        self.get(memory.memory_id)
+        validate_memory(memory)
+        self._memories[memory.memory_id] = memory
+        application_context.events.emit(
+            MemoryUpdated(
+                source=SOURCE,
+                payload={
+                    "memory_id": str(memory.memory_id),
+                    "importance": memory.importance,
+                },
+            )
+        )
 
     def forget(self, memory_id: UUID, application_context: ApplicationContext) -> None:
         self.get(memory_id)
