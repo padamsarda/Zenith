@@ -11,11 +11,12 @@ the policy only chooses.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from engineering_manager.domain.account import ProviderAccount
 from engineering_manager.domain.session import Session
 from engineering_manager.domain.task import Task
+from engineering_manager.exceptions import OrchestrationError
 
 
 class AssignmentPolicy(ABC):
@@ -60,3 +61,65 @@ class FirstAvailablePolicy(AssignmentPolicy):
             if (account.provider_id, account.account_id) not in busy:
                 return account
         return None
+
+
+class ConcurrencyLimitedPolicy(AssignmentPolicy):
+    """Picks the first account whose *provider* is under its concurrency limit.
+
+    Generalizes `FirstAvailablePolicy`'s "one open session per account"
+    (correct for providers where an account is a single exclusive
+    session, like an interactive CLI login) to a configurable cap per
+    `provider_id`, counted across every account on that provider — some
+    providers can genuinely run several sessions at once (separate API
+    keys, separate working directories), others exactly one. A
+    `provider_id` absent from `limits` falls back to `default_limit`.
+
+    Accounts are still tried in the order given, so the caller's
+    ordering (e.g. preferred account first) is preserved; this policy
+    only changes *whether* an account is skipped, not the order.
+    """
+
+    def __init__(
+        self, limits: Mapping[str, int] | None = None, *, default_limit: int = 1
+    ) -> None:
+        """Create the policy.
+
+        Args:
+            limits: Per-`provider_id` concurrency caps. A provider not
+                named here uses `default_limit`.
+            default_limit: The concurrency cap for any provider not in
+                `limits`.
+
+        Raises:
+            OrchestrationError: If `default_limit` or any value in
+                `limits` is not a positive int.
+        """
+        _validate_positive_int("default_limit", default_limit)
+        for provider_id, limit in (limits or {}).items():
+            _validate_positive_int(f"limits[{provider_id!r}]", limit)
+        self._limits = dict(limits or {})
+        self._default_limit = default_limit
+
+    def choose_account(
+        self,
+        task: Task,
+        accounts: Sequence[ProviderAccount],
+        open_sessions: Sequence[Session],
+    ) -> ProviderAccount | None:
+        """Return the first account whose provider has spare concurrency."""
+        open_counts: dict[str, int] = {}
+        for session in open_sessions:
+            open_counts[session.provider_id] = open_counts.get(session.provider_id, 0) + 1
+        for account in accounts:
+            limit = self._limits.get(account.provider_id, self._default_limit)
+            if open_counts.get(account.provider_id, 0) < limit:
+                return account
+        return None
+
+
+def _validate_positive_int(label: str, value: object) -> None:
+    """Raise OrchestrationError unless `value` is a positive int (not bool)."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise OrchestrationError(f"{label} must be an int, got {value!r}")
+    if value < 1:
+        raise OrchestrationError(f"{label} must be at least 1, got {value}")

@@ -41,7 +41,9 @@ listing. Summary:
 - **architecture/** — Architecture Decision Records. Start with
   [`architecture/README.md`](architecture/README.md).
 - **docs/** — technical reference documentation.
-- **plugins/** — reserved location for future Zenith plugin code.
+- **plugins/** — Zenith plugins, auto-discovered and loaded at startup
+  (`PluginLoader`, ADR 0017). `plugins/engineering_workflow/` is the
+  first one, and ships the first genuine assistant `Skill`.
 - **tests/** — pytest suite, one file per source module.
 
 ## Requirements
@@ -102,6 +104,8 @@ pytest
 Read [`docs/conventions.md`](docs/conventions.md) before writing code,
 and [`CLAUDE.md`](CLAUDE.md) if you are an AI contributor. Significant
 architectural decisions are recorded in [`architecture/`](architecture/).
+CI (`.github/workflows/ci.yml`) runs this same gate against Python 3.12
+and 3.13 on every push to `master` and every pull request.
 
 ## Further reading
 

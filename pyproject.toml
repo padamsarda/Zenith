@@ -43,6 +43,8 @@ packages = [
     "engineering_manager.store",
     "engineering_tools",
     "engineering_tools.watchdog",
+    "plugins",
+    "plugins.engineering_workflow",
 ]
 
 [tool.pytest.ini_options]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +30,7 @@ from runtime.commands.context import CommandContext
 from runtime.context import ApplicationContext
 from runtime.conversation.conversation import Conversation
 from runtime.conversation.message import MessageRole
+from runtime.conversation.sqlite.store import SQLiteConversationStore
 from runtime.providers.base import AssistantTurn, ToolCall
 from runtime.providers.scripted import ScriptedProvider
 from shared.events.event import Event
@@ -185,6 +187,44 @@ def test_second_turn_brief_includes_the_tool_result() -> None:
         MessageRole.USER,
         MessageRole.TOOL,
     ]
+
+
+# --- conversation stores that reconstruct on every get() ----------------
+#
+# InMemoryConversationStore.get() returns the same live object every
+# call, so the engine would still see appended messages even if it held
+# a `conversation` reference across a whole request by mistake.
+# SQLiteConversationStore.get() rebuilds a fresh Conversation from
+# storage each call, which is the real pressure test of whether the
+# engine actually re-reads durable state per turn (ADR 0010) rather than
+# relying on that in-memory implementation detail.
+
+
+def test_second_turn_brief_includes_the_tool_result_with_a_reconstructing_store(
+    tmp_path: Path,
+) -> None:
+    app_context = make_application_context()
+    app_context.conversations = SQLiteConversationStore(tmp_path / "conversations.db")
+    app_context.tools.register(ClockTool(), app_context)
+    provider = install_scripted(
+        app_context,
+        [
+            AssistantTurn(tool_calls=(ToolCall(tool_id="clock"),)),
+            AssistantTurn(text="Done."),
+        ],
+    )
+    conversation = make_conversation(app_context)
+
+    response = app_context.assistant.handle(make_request(conversation), app_context)
+
+    assert response.success is True
+    assert response.text == "Done."
+    second_brief = provider.briefs[1]
+    assert [message.role for message in second_brief.messages] == [
+        MessageRole.USER,
+        MessageRole.TOOL,
+    ]
+    app_context.conversations.close()
 
 
 # --- provider resolution ------------------------------------------------

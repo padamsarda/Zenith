@@ -69,6 +69,34 @@ class Conversation:
         """A snapshot of the conversation's messages, oldest first."""
         return tuple(self._messages)
 
+    @classmethod
+    def restore(
+        cls,
+        *,
+        conversation_id: UUID,
+        created_at: datetime,
+        title: str | None,
+        metadata: dict[str, Any],
+        state: ConversationState,
+        messages: list[Message],
+    ) -> Conversation:
+        """Rebuild a Conversation from durable storage.
+
+        For a `ConversationStore` implementation reconstructing history,
+        not for ordinary use — it bypasses the checks real construction
+        and appending enforce (a fresh `Conversation` always starts
+        `ACTIVE` with no messages; `append` refuses anything once
+        `ARCHIVED`). Every value here already passed those checks once,
+        at the moment it was originally created or appended; restoring
+        them is not re-deciding whether they were valid.
+        """
+        conversation = cls(title=title, metadata=metadata)
+        conversation._conversation_id = conversation_id
+        conversation._created_at = created_at
+        conversation._state = state
+        conversation._messages = messages
+        return conversation
+
     def transition_to(self, new_state: ConversationState) -> None:
         """Move this conversation to `new_state`.
 

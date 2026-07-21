@@ -9,6 +9,7 @@ from runtime.plugins.events import (
     PluginDisabled,
     PluginEnabled,
     PluginFailed,
+    PluginLoadFailed,
     PluginRegistered,
     PluginUnregistered,
 )
@@ -19,6 +20,7 @@ ALL_PLUGIN_EVENT_TYPES = (
     PluginDisabled,
     PluginUnregistered,
     PluginFailed,
+    PluginLoadFailed,
 )
 
 
@@ -66,5 +68,13 @@ def test_plugin_unregistered_carries_plugin_id() -> None:
     assert event.payload["plugin_id"] == "p"
 
 
+def test_plugin_load_failed_carries_path_and_reason() -> None:
+    event = PluginLoadFailed(
+        source="plugin_loader", payload={"path": "/plugins/broken/plugin.py", "reason": "boom"}
+    )
+
+    assert event.payload == {"path": "/plugins/broken/plugin.py", "reason": "boom"}
+
+
 def test_plugin_events_are_distinct_types() -> None:
-    assert len(set(ALL_PLUGIN_EVENT_TYPES)) == 5
+    assert len(set(ALL_PLUGIN_EVENT_TYPES)) == 6

@@ -1,10 +1,11 @@
 # Plugin Framework
 
-The core plugin architecture: what a plugin is, and how Zenith
-communicates with it. This milestone defines the contract and the
-bookkeeping — it does not discover, load, or import plugins from disk.
-Plugins are instantiated directly by whatever creates them (currently:
-tests).
+The plugin architecture: what a plugin is, how Zenith discovers and
+loads one from disk, and how it communicates with the registries it
+contributes to. `PluginRegistry` itself only stores and drives plugins
+it is handed — discovery and import are `PluginLoader`'s job (ADR 0017),
+kept separate so a test can still construct and register a `Plugin`
+directly without touching the filesystem.
 
 ## Overview
 
@@ -14,6 +15,7 @@ Plugin               abstract base class every plugin implements
 PluginState          the plugin's lifecycle state
 PluginContext        what a plugin's hooks can see
 PluginRegistry        stores plugins and orchestrates their lifecycle
+PluginLoader          discovers plugin.py files under plugins/ and registers them
 ```
 
 ## PluginManifest
@@ -188,6 +190,11 @@ Defined in `runtime.plugins.events`, all `Event` subclasses emitted by
 - `PluginUnregistered` — payload: `plugin_id`, `name`.
 - `PluginFailed` — payload: `plugin_id`, `reason`.
 
+`PluginLoadFailed` (payload: `path`, `reason`) is the one plugin event
+*not* emitted by `PluginRegistry` — `PluginLoader` emits it, with
+`source="plugin_loader"`, for a plugin directory that never produced a
+`Plugin` to hand the registry (see PluginLoader, below).
+
 Same rules as every other event on the bus (see `events.md`): type-exact
 dispatch, subscription order preserved, a failing listener is logged and
 does not stop the others.
@@ -203,34 +210,123 @@ Added to `runtime.exceptions`, all under `PluginError(ZenithError)`:
   state transition.
 - `PluginLifecycleError` — a hook raised during `register` or
   `unregister`. Wraps the original exception (`__cause__`).
+- `PluginLoadError` — raised internally by `PluginLoader` for a plugin
+  directory that never produced a `Plugin` (import failure, missing
+  `create_plugin`, or a factory that didn't return one).
+  `PluginLoader.load_all` always catches this itself; it does not
+  escape to callers.
+
+## PluginLoader
+
+`runtime.plugins.loader.PluginLoader` (ADR 0017) is how a `Plugin`
+instance comes to exist from a file on disk, rather than from a test
+constructing one directly.
+
+**Convention:** every immediate subdirectory of `plugins/` is a
+candidate plugin. A candidate is loaded if it contains a `plugin.py`
+file with a module-level factory function:
+
+```python
+# plugins/my_plugin/plugin.py
+from runtime.plugins.plugin import Plugin
+
+class MyPlugin(Plugin):
+    ...
+
+def create_plugin() -> Plugin:
+    return MyPlugin()
+```
+
+No decorator, no metaclass, no registration side effect on import —
+`create_plugin` is called explicitly, once, by the loader.
+
+```python
+loader = PluginLoader(plugins_dir)
+loaded = loader.load_all(registry, application_context)   # -> list[Plugin]
+```
+
+`load_all`:
+
+1. Discovers `plugin.py` files directly under `plugins_dir`'s immediate
+   subdirectories, sorted by directory name (`plugins_dir` not existing
+   discovers nothing — not an error).
+2. Imports each with `importlib.util.spec_from_file_location` (a
+   file-path import, not a package-relative one — `runtime/` never
+   statically imports `plugins/` or anything under it).
+3. Calls the module's `create_plugin()` and hands the result to
+   `registry.register(plugin, application_context)`.
+
+**Failures never propagate out of `load_all`.** A plugin directory that
+fails to import, has no `create_plugin`, whose factory raises, or whose
+factory returns something other than a `Plugin` is logged and reported
+as `PluginLoadFailed` (payload: `path`, `reason`), then skipped. A
+plugin that imports fine but fails `PluginRegistry.register` itself
+(bad manifest, an `initialize`/`register` hook raising) is also caught
+and skipped — `PluginRegistry` already emitted `PluginFailed` for that
+case, so the loader does not double-report it. One broken plugin never
+prevents the rest, or the runtime, from starting.
 
 ## Interaction with Runtime and ApplicationContext
 
 `ApplicationContext` owns one `PluginRegistry` (`context.plugins`),
 created the same way it owns `services`, `events`, and `commands` — a
-`field(default_factory=PluginRegistry)`. `Runtime` itself does not
-register any plugin in this milestone; the lifecycle it owns (`start` /
-`stop`) has nothing to load yet. What this milestone establishes is the
-path a future loading step will use:
+`field(default_factory=PluginRegistry)`. `Runtime.start()` calls
+`PluginLoader(base_path / "plugins").load_all(context.plugins, context)`
+unconditionally, after the assistant subsystem is ready — `plugins/` is
+already a required top-level folder (`REQUIRED_FOLDERS`), so this
+requires no new configuration:
 
 ```
-Runtime -> ApplicationContext.plugins (PluginRegistry)
-             .register(plugin, application_context)
-               -> emits PluginRegistered / PluginFailed on ApplicationContext.events
+Runtime.start()
+  -> PluginLoader(base_path / "plugins")
+       .load_all(context.plugins, context)
+         -> for each plugin.py: import, create_plugin(), registry.register(plugin, context)
+              -> emits PluginRegistered / PluginFailed / PluginLoadFailed on context.events
 ```
 
-Anything that wants to react to plugin lifecycle changes — logging,
-future UI, other plugins — subscribes to these events on
+An empty `plugins/` (no `plugin.py` files) loads nothing and changes
+nothing — discovery itself has no side effect. This is unlike
+registering `ClaudeProvider` (ADR 0015) or an ADR 0016 tool, which an
+integrator opts into explicitly because doing so grants real capability;
+a plugin that only contributes a `Skill` is inert text with no
+permission question (ADR 0013) and is safe to auto-load, but a plugin
+that contributes a `Tool` hands it to whatever `PermissionPolicy` is
+configured — `AllowAllPolicy` by default. An integrator loading
+untrusted plugins should pair it with a `ToolAllowlistPolicy`, the same
+seam that already governs directly-registered tools.
+
+Anything that wants to react to plugin lifecycle or load changes —
+logging, future UI, other plugins — subscribes to these events on
 `context.events`, exactly as it would for lifecycle or command events.
 
-## Future loading strategy (out of scope here)
+## Reaching other registries from a plugin
 
-This milestone deliberately does not implement how a `Plugin` instance
-comes to exist in the first place. Filesystem discovery, dynamic
-imports (`importlib`), loading from `plugins/`, ZIP or remote plugins,
-inter-plugin dependencies, permissions, sandboxing, plugin configuration
-files, hot reload, and auto-discovery are all out of scope. A future
-milestone can add a loader that scans `plugins/`, imports each module,
-constructs a `Plugin`, and calls `PluginRegistry.register` — everything
-that loader would need (the `Plugin` contract, `PluginManifest`,
-`PluginRegistry`, the events) already exists as of this milestone.
+`Plugin.register(self, registry: PluginRegistry)` only carries the
+plugin registry itself — not `ApplicationContext`, so not
+`context.tools`/`context.skills` directly. A plugin that contributes a
+tool or skill captures the `ApplicationContext` in `initialize` (which
+does receive a `PluginContext`) and uses it from `register`:
+
+```python
+def initialize(self, context: PluginContext) -> None:
+    self._application_context = context.application_context
+
+def register(self, registry: PluginRegistry) -> None:
+    self._application_context.skills.register(my_skill, self._application_context)
+
+def unregister(self, registry: PluginRegistry) -> None:
+    self._application_context.skills.unregister(my_skill.skill_id, self._application_context)
+```
+
+`PluginRegistry.register` always calls `initialize` before `register`,
+so the captured context is available by the time `register` runs.
+`plugins/engineering_workflow/plugin.py` is a real, tested example of
+this shape — see ADR 0017.
+
+## Out of scope
+
+ZIP or remote plugins, inter-plugin dependencies, plugin permissions or
+sandboxing beyond a tool's own `PermissionPolicy`, plugin-specific
+configuration files, and hot reload remain unimplemented. Nothing about
+`PluginLoader`'s discovery convention forecloses any of them — a future
+change extends the loader, not the framework underneath it.

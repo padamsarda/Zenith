@@ -20,6 +20,7 @@ from runtime.events.lifecycle_events import (
 )
 from shared.exceptions import ConfigurationError, ZenithRuntimeError
 from runtime.logging_setup import configure_logging
+from runtime.plugins.loader import PluginLoader
 from runtime.providers.echo import EchoProvider
 from runtime.state import RuntimeState
 from shared.utils.fs_utils import directory_exists
@@ -109,6 +110,7 @@ class Runtime:
             raise
 
         self._initialize_assistant()
+        self._load_plugins()
 
         self.context.state = RuntimeState.RUNNING
         self.context.logger.info("Zenith runtime started.")
@@ -186,6 +188,17 @@ class Runtime:
             "Assistant subsystem ready (default provider: %s).",
             self.context.config.assistant_provider,
         )
+
+    def _load_plugins(self) -> None:
+        """Discover and register every plugin under `base_path / "plugins"`.
+
+        A plugin that fails to load is logged and skipped
+        (`PluginLoader`) — plugin failures never prevent the runtime
+        from reaching RUNNING.
+        """
+        loader = PluginLoader(self.base_path / "plugins", logger=self.context.logger)
+        loaded = loader.load_all(self.context.plugins, self.context)
+        self.context.logger.info("Loaded %d plugin(s).", len(loaded))
 
     def _idle(self) -> None:
         """Block until the runtime is no longer in the RUNNING state."""

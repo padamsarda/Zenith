@@ -95,8 +95,24 @@ it.
 Events (`source="conversation_store"`): `ConversationStarted`,
 `MessageAppended`, `ConversationArchived`.
 
-The store is **in-memory only** — conversations do not survive a
-restart. See Deliberate deferrals.
+`ConversationStore` (`runtime/conversation/store.py`) is an ABC with two
+implementations (ADR 0018):
+
+- **`InMemoryConversationStore`** — `context.conversations`'s default.
+  Conversations do not survive a restart; harmless scaffolding in the
+  same role `EchoProvider` plays for assistant providers.
+- **`SQLiteConversationStore`** (`runtime/conversation/sqlite/`) — the
+  durable one, structured like the Engineering Manager's SQLite store
+  (ADR 0004). Not auto-wired: assign an instance onto
+  `context.conversations` the same way `ClaudeProvider` (ADR 0015) or a
+  `runtime.tools` tool is registered.
+
+Both emit the same events with the same `source`, and — because
+`append`/`archive` run the ordinary `Conversation.append`/`transition_to`
+on a reconstructed object rather than reimplementing those rules —
+reject exactly the same appends and transitions. Any future
+`ConversationStore` should do the same: implement persistence, not a
+second copy of the domain's validation.
 
 ## Capabilities (ADR 0013)
 
@@ -494,19 +510,33 @@ the point of the milestone.
 
 Documented so they read as decisions, not oversights:
 
-- **Durable conversations** — `ConversationStore` is in-memory.
-  Persistence is a store implementation behind the same interface; the
-  Engineering Manager's SQLite store (ADR 0004) is the proven pattern,
-  and briefs are already assembled from durable state, so nothing else
-  changes.
+- **Durable conversations** — shipped: `ConversationStore` is now an ABC
+  (`runtime/conversation/store.py`), `InMemoryConversationStore` is the
+  unchanged default, and `SQLiteConversationStore`
+  (`runtime/conversation/sqlite/`, ADR 0018) is the durable backend, an
+  integrator assigns onto `context.conversations` the same way a
+  `runtime.tools` tool is registered. Testing it against the real
+  pipeline (not just its own tests) found a real bug in
+  `AssistantEngine.handle` — it held a `conversation` reference across
+  the whole turn loop, which only worked because the in-memory store's
+  `get()` happens to return a live, shared-mutation object. Fixed by
+  re-fetching every turn, which is what ADR 0010's "assembled from
+  durable state, never cached" already claimed should happen.
 - **Real provider integrations** — shipped: `ClaudeProvider` (ADR 0015)
   implements the one method (`generate_turn`) the contract asks for. A
   second real integration remains the next pressure test of the
   contract's provider-agnosticism.
-- **Plugin-contributed capabilities** — `Plugin.register(registry)` is
-  where a plugin will contribute tools and skills. It needs the plugin
-  *loader* (`docs/plugins.md`), which remains future work; the
-  registries it will call already exist.
+- **Plugin-contributed capabilities** — shipped: `PluginLoader`
+  (ADR 0017, `docs/plugins.md`) discovers `plugin.py` files under
+  `plugins/` and registers them at `Runtime.start()`.
+  `plugins/engineering_workflow/` is the first plugin loaded this way,
+  and ships the first genuine `Skill` (`EngineeringWorkflowSkill`) —
+  `Plugin.register(registry)` is now the real distribution mechanism
+  ADR 0013 described, not a hook nothing calls. A plugin that
+  contributes a `Tool` rather than a `Skill` is the next pressure test:
+  it would be free to act under whatever `PermissionPolicy` is
+  configured (`AllowAllPolicy` by default), which auto-loading a
+  skill-only plugin deliberately sidesteps.
 - **Streaming and concurrency** — synchronous throughout (ADR 0007).
   Both fit behind `handle` when they are needed.
 - **Cooperative cancellation** — `RequestStatus.CANCELLED` is still

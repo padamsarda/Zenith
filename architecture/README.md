@@ -43,3 +43,5 @@ longer applies or accidentally reversing one that still does.
 - [0014 — Claude Code CLI as the Engineering Manager's first real Provider](0014-claude-code-cli-as-first-em-provider.md)
 - [0015 — A stdlib-only Claude Messages API client as Zenith's first real AssistantProvider](0015-stdlib-claude-messages-client-as-first-assistant-provider.md)
 - [0016 — Filesystem, Shell, Git, Diff, and Test Runner: the first production tool suite](0016-filesystem-shell-git-diff-test-runner-tool-suite.md)
+- [0017 — Plugin discovery and loading from disk](0017-plugin-discovery-and-loading-from-disk.md)
+- [0018 — SQLite-backed durable conversations](0018-sqlite-backed-durable-conversations.md)

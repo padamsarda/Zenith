@@ -33,13 +33,20 @@ runtime/                       The Zenith assistant runtime.
         context.py               PluginContext.
         events.py                Concrete plugin lifecycle events.
         registry.py              PluginRegistry.
+        loader.py                PluginLoader: discovers/imports plugin.py
+                                   files under plugins/ (ADR 0017).
     conversation/
         message.py               Message, MessageRole.
         state.py                 ConversationState enum, TERMINAL_STATES.
         validation.py            Conversation validation guard functions.
         conversation.py          Conversation (append-only message history).
         events.py                Concrete conversation events.
-        store.py                 ConversationStore.
+        store.py                 ConversationStore (ABC).
+        in_memory_store.py       InMemoryConversationStore (default).
+        sqlite/                  SQLiteConversationStore (ADR 0018).
+            database.py           Connection + user_version migrations.
+            serialization.py      Domain-object <-> row conversion.
+            store.py               SQLiteConversationStore.
     capabilities/
         tool.py                  Tool (ABC), ToolParameter.
         skill.py                 Skill (ABC).
@@ -54,6 +61,19 @@ runtime/                       The Zenith assistant runtime.
         registry.py              AssistantProviderRegistry.
         echo.py                  EchoProvider (built-in default).
         scripted.py              ScriptedProvider (reference implementation).
+        claude.py                ClaudeProvider: first real AssistantProvider (ADR 0015).
+        claude_messages.py       Message/tool-call translation to the Claude API format.
+        claude_transport.py      HTTP transport for the Claude Messages API.
+        claude_stream.py         SSE parsing for streaming Claude responses.
+    tools/                       The first production tool suite (ADR 0016).
+        sandbox.py               resolve_within_root, read_sandboxed_text.
+        process.py               run_process: shared subprocess harness.
+        arguments.py             Argument-extraction helpers for Tool.invoke.
+        filesystem.py            FilesystemTool.
+        shell.py                 ShellTool.
+        git.py                   GitTool.
+        diff.py                  DiffTool.
+        test_runner.py           TestRunnerTool.
     assistant/
         status.py                RequestStatus enum, TERMINAL_STATUSES.
         validation.py            Request and turn guard functions.
@@ -70,6 +90,7 @@ engineering_manager/           The Engineering Manager application.
     __init__.py                 Package docstring only.
     __main__.py                 `python -m engineering_manager` entry point.
     cli.py                      Command-line interface over the facade.
+    cli_commands.py             Command handlers the CLI dispatches to.
     manager.py                  EngineeringManager facade.
     events.py                   Concrete Engineering Manager events.
     exceptions.py               EM exception hierarchy (rooted at ZenithError).
@@ -87,13 +108,18 @@ engineering_manager/           The Engineering Manager application.
                                   ProviderSessionState, ProviderSessionStatus.
         registry.py              ProviderRegistry.
         in_memory.py             InMemoryProvider (reference implementation).
+        claude_code.py           ClaudeCodeProvider: first real Provider (ADR 0014).
+        claude_code_process.py   Subprocess plumbing for the Claude Code CLI.
+        claude_code_output.py    Interpreting a finished subprocess's output.
     store/
         database.py              SQLite connection + user_version migrations.
         serialization.py         Entity <-> row conversion, EventLogEntry.
         store.py                 Store: strict CRUD + append-only event log.
     orchestration/
-        policy.py                AssignmentPolicy ABC, FirstAvailablePolicy.
-        retry.py                 RetryPolicy ABC, LimitedRetryPolicy.
+        policy.py                AssignmentPolicy ABC, FirstAvailablePolicy,
+                                   ConcurrencyLimitedPolicy.
+        retry.py                 RetryPolicy ABC, LimitedRetryPolicy,
+                                   ExponentialBackoffRetryPolicy.
         graph.py                 Dependency-graph analysis: cycles, waves, blockages.
         context.py               ContextAssembler: composes session briefs.
         plans.py                 PlanCoordinator: plan lifecycle operations.
@@ -124,9 +150,16 @@ engineering_tools/             Standalone developer utilities, self-contained
 
 architecture/                  Architecture Decision Records. See its README.
 docs/                          Technical reference documentation (this folder).
-plugins/                       Reserved for future Zenith plugin code on disk.
+plugins/                       Zenith plugins, discovered and loaded at
+                                startup (ADR 0017). Each subdirectory is one
+                                plugin's plugin.py + create_plugin() factory.
+    engineering_workflow/
+        plugin.py                EngineeringWorkflowPlugin: the first genuine
+                                   Skill, teaching a safe order of operations
+                                   over the ADR 0016 tool suite.
 tests/                         pytest suite, one file per module under test
-                                (Engineering Manager tests use a test_em_ prefix).
+                                (Engineering Manager tests use a test_em_ prefix;
+                                 plugin tests use a test_plugin_ prefix).
 ```
 
 ## Purpose of each top-level directory
@@ -145,7 +178,7 @@ tests/                         pytest suite, one file per module under test
   lifted out independently.
 - **architecture/** — ADRs: why the system is the way it is.
 - **docs/** — reference docs: how the system is built.
-- **plugins/** — reserved location for Zenith plugin code loaded from
-  disk by a future loader (`docs/plugins.md`); not to be confused with
+- **plugins/** — Zenith plugin code loaded from disk by `PluginLoader`
+  at startup (`docs/plugins.md`, ADR 0017); not to be confused with
   `runtime/plugins/`, the framework itself.
 - **tests/** — one flat pytest suite covering every package above.

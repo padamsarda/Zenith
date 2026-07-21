@@ -202,6 +202,39 @@ def test_runtime_start_survives_failing_listener() -> None:
     runtime.stop()
 
 
+def test_runtime_start_loads_plugins_from_the_plugins_directory() -> None:
+    runtime = Runtime(base_path=PROJECT_ROOT)
+
+    runtime.start()
+
+    assert runtime.context.plugins.has("engineering-workflow")
+    runtime.stop()
+
+
+def test_runtime_start_activates_a_plugin_contributed_skill() -> None:
+    runtime = Runtime(base_path=PROJECT_ROOT)
+
+    runtime.start()
+
+    assert runtime.context.skills.has("engineering-workflow")
+    runtime.stop()
+
+
+def test_runtime_start_with_no_plugins_directory_still_reaches_running(
+    tmp_path: Path,
+) -> None:
+    for folder in ("runtime", "configs", "architecture", "docs", "tests"):
+        (tmp_path / folder).mkdir()
+    (tmp_path / "plugins").mkdir()
+    runtime = Runtime(base_path=tmp_path)
+
+    runtime.start()
+
+    assert runtime.state is RuntimeState.RUNNING
+    assert runtime.context.plugins.list() == []
+    runtime.stop()
+
+
 def test_runtime_start_registers_the_echo_provider() -> None:
     runtime = Runtime(base_path=PROJECT_ROOT)
 

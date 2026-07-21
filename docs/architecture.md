@@ -76,7 +76,11 @@ everything else (`Config`, `Event`) is immutable.
    are registered by plugins or startup integrations; the configured
    default (`config.assistant_provider`) may name one that arrives
    later, since resolution happens per request.
-7. `context.state = RUNNING`; emit `ApplicationStarted`.
+7. Load plugins: `PluginLoader` (`plugins.md`, ADR 0017) discovers
+   `plugin.py` files under `base_path / "plugins"` and registers each
+   one. A plugin that fails to load or register is logged and skipped —
+   never fatal to startup.
+8. `context.state = RUNNING`; emit `ApplicationStarted`.
 
 ## Serving (`Runtime.run`)
 
@@ -106,10 +110,11 @@ shutdown either way, and `stop()` always runs.
 | `runtime/validation.py` | Guard functions used at system boundaries. |
 | `runtime/events/` | Concrete runtime lifecycle events. The event system itself (`Event`, `EventBus`, `EventLogger`) lives in `shared/events/` — see `events.md`. |
 | `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
-| `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, and concrete plugin events. See `plugins.md`. |
-| `runtime/conversation/` | `Message`, `Conversation`, `ConversationState`, `ConversationStore`, and concrete conversation events. See `assistant.md`. |
+| `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, `PluginLoader`, and concrete plugin events. See `plugins.md`. |
+| `runtime/conversation/` | `Message`, `Conversation`, `ConversationState`, the `ConversationStore` ABC, `InMemoryConversationStore`, `SQLiteConversationStore` (ADR 0018), and concrete conversation events. See `assistant.md`. |
 | `runtime/capabilities/` | `Tool`, `Skill`, their registries, the `CapabilityCatalog`, and concrete capability events. See `assistant.md`. |
-| `runtime/providers/` | `AssistantProvider`, `TurnBrief`, `AssistantTurn`, `ToolCall`, `AssistantProviderRegistry`, and the built-in `EchoProvider` / `ScriptedProvider`. See `assistant.md`. |
+| `runtime/providers/` | `AssistantProvider`, `TurnBrief`, `AssistantTurn`, `ToolCall`, `AssistantProviderRegistry`, the built-in `EchoProvider` / `ScriptedProvider`, and `ClaudeProvider` (ADR 0015). See `assistant.md`. |
+| `runtime/tools/` | `FilesystemTool`, `ShellTool`, `GitTool`, `DiffTool`, `TestRunnerTool`, and the shared `sandbox`/`process`/`arguments` helpers they build on (ADR 0016). See `assistant.md`. |
 | `runtime/assistant/` | `AssistantRequest`, `AssistantResponse`, `AssistantEngine`, `ToolCallRunner`, `AssistantContextAssembler`, `PermissionPolicy`, `AssistantHook`, and concrete assistant events. See `assistant.md`. |
 | `shared/exceptions.py` | Generic exception hierarchy (`ZenithError` and a handful of domain-agnostic subclasses, including `EventBusError`) with no dependency on a specific runtime subsystem. |
 | `shared/events/` | The event system: `Event`, `EventBus`, `EventLogger`. |
@@ -159,7 +164,8 @@ since `registry.py` imports `context.py` for real (to construct
 Every module under `runtime/conversation/`, `runtime/capabilities/`,
 and `runtime/assistant/` that needs the `ApplicationContext` follows
 the same rule, for the same reason: `runtime.context` imports
-`ConversationStore`, both capability registries,
+`ConversationStore` (the type) and `InMemoryConversationStore` (the
+default factory — ADR 0018), both capability registries,
 `AssistantProviderRegistry`, and `AssistantEngine` at runtime to build
 its fields. `runtime/capabilities/skill.py` likewise refers to
 `AssistantRequest` only under `TYPE_CHECKING`, since the assistant

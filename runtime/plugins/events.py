@@ -30,3 +30,15 @@ class PluginUnregistered(Event):
 @dataclass(frozen=True)
 class PluginFailed(Event):
     """Emitted when a Plugin's hook raises during registration or unregistration."""
+
+
+@dataclass(frozen=True)
+class PluginLoadFailed(Event):
+    """Emitted by PluginLoader when a plugin directory could not produce a Plugin.
+
+    Covers failures before a `Plugin` instance ever exists to register —
+    an import error, a missing `create_plugin` factory, or a factory
+    that does not return a `Plugin` — so it is distinct from
+    `PluginFailed`, which covers a constructed `Plugin`'s own lifecycle
+    hooks raising during `PluginRegistry.register`.
+    """

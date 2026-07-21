@@ -81,6 +81,17 @@ class PluginLifecycleError(PluginError):
     """
 
 
+class PluginLoadError(PluginError):
+    """Raised by a single-plugin load helper when a plugin directory does
+    not produce a usable `Plugin` (import failure, missing factory, or a
+    factory that returns something other than a `Plugin`).
+
+    `PluginLoader.load_all` catches this per plugin directory rather than
+    letting it propagate, so one broken plugin cannot stop the rest from
+    loading or the runtime from starting.
+    """
+
+
 class ConversationError(ZenithError):
     """Base class for all conversation model errors."""
 
@@ -97,6 +108,15 @@ class ConversationValidationError(ConversationError):
     Covers structural issues (role, content, metadata), invalid
     `ConversationState` transitions, and appending to a conversation
     that is no longer active.
+    """
+
+
+class ConversationStoreError(ConversationError):
+    """Raised by a durable `ConversationStore` for a storage-layer failure
+    that is not a `ConversationNotFoundError` or `ConversationValidationError`
+    — a newer-than-supported schema, or a migration or query that failed
+    for reasons the store itself did not cause (disk I/O, a corrupt
+    database file). Mirrors the Engineering Manager's `StoreError`.
     """
 
 

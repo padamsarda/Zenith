@@ -11,6 +11,7 @@ from runtime.assistant.engine import AssistantEngine
 from runtime.capabilities.skill_registry import SkillRegistry
 from runtime.capabilities.tool_registry import ToolRegistry
 from runtime.commands.executor import CommandExecutor
+from runtime.conversation.in_memory_store import InMemoryConversationStore
 from runtime.conversation.store import ConversationStore
 from runtime.plugins.registry import PluginRegistry
 from runtime.providers.registry import AssistantProviderRegistry
@@ -41,7 +42,7 @@ class ApplicationContext:
     events: EventBus = field(default_factory=EventBus)
     commands: CommandExecutor = field(default_factory=CommandExecutor)
     plugins: PluginRegistry = field(default_factory=PluginRegistry)
-    conversations: ConversationStore = field(default_factory=ConversationStore)
+    conversations: ConversationStore = field(default_factory=InMemoryConversationStore)
     tools: ToolRegistry = field(default_factory=ToolRegistry)
     skills: SkillRegistry = field(default_factory=SkillRegistry)
     assistant_providers: AssistantProviderRegistry = field(

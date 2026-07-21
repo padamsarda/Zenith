@@ -35,14 +35,27 @@ that gap with no new mechanism. Worth an ADR when it lands: how
 decompositions are reviewed (the plan's DRAFT state is the natural
 gate).
 
-### 3. Richer assignment and retry policies
+### 3. Richer assignment and retry policies — partially shipped
 
-`FirstAvailablePolicy` ignores cost, capability, and history;
-`LimitedRetryPolicy` ignores failure kind and backoff. Add policies
-using per-provider concurrency limits, model/task matching
-(`SessionSpec.model` is already plumbed), past outcomes (the event log
-already records them), and failure-aware retry delays. Both seams
-absorb this without engine or dispatcher changes.
+`ConcurrencyLimitedPolicy` (`orchestration/policy.py`) generalizes
+`FirstAvailablePolicy`'s "one open session per account" to a
+configurable cap per provider, counted across every account on it.
+`ExponentialBackoffRetryPolicy` (`orchestration/retry.py`) adds
+failure-aware delay on top of `LimitedRetryPolicy`'s attempt budget,
+using nothing but the existing tick's polling to re-evaluate the delay
+— no engine or dispatcher change, as this item anticipated. Both were
+added, tested (including against a live `Dispatcher`/`ExecutionEngine`,
+not just in isolation — see `ExponentialBackoffRetryPolicy`'s docstring
+for a clock-consistency caveat that surfaced doing so), and documented
+without touching either seam's shape.
+
+Still open: cost/capability-aware assignment and model/task matching
+(`SessionSpec.model` is already plumbed, but no `ProviderAccount` field
+yet describes what a given account supports — this needs a concrete
+domain field, not just a policy, so it's deferred rather than
+half-built) and past-outcome-aware assignment (the event log already
+records enough to build one). Both seams still absorb this without
+engine or dispatcher changes.
 
 ### 4. Store hardening as concurrency arrives
 
@@ -81,21 +94,34 @@ additively. A second adapter remains the next pressure test of the
 contract's provider-agnosticism; extend it additively if it falls short
 (ADR 0011).
 
-### 2. Durable conversations
+### 2. Durable conversations — shipped
 
-`ConversationStore` is in-memory, so history dies with the process.
-Persistence is a store implementation behind the same interface — the
-Engineering Manager's SQLite store (ADR 0004) is the proven pattern to
-copy. Briefs are already assembled from durable state (ADR 0010's
-principle), so nothing else changes. Worth an ADR when it lands:
-whether both applications share one database file.
+`ConversationStore` is now an ABC (ADR 0018); `InMemoryConversationStore`
+is the unchanged default, `SQLiteConversationStore`
+(`runtime/conversation/sqlite/`) is the durable one, structured exactly
+like the Engineering Manager's SQLite store (ADR 0004) — the "proven
+pattern to copy" this item asked for, copied rather than shared, since
+the two applications' persistence needs don't otherwise touch (ADR
+0002). Not auto-wired: an integrator assigns it onto
+`context.conversations`, the same way `ClaudeProvider` or a
+`runtime.tools` tool is registered. Building and testing it against the
+real pipeline (not just its own unit tests) found and fixed a real bug
+in `AssistantEngine` — see ADR 0018's "A bug this exposed" section. One
+database file, not shared with the Engineering Manager, answering the
+question this item asked.
 
-### 3. Plugin loading, and capabilities through it
+### 3. Plugin loading, and capabilities through it — shipped
 
-Discovery/import from `plugins/` into the existing `PluginRegistry`;
-the framework and events already exist. This is what makes
-`Plugin.register(registry)` the real distribution mechanism for tools
-and skills (ADR 0013) rather than a hook nothing calls.
+`PluginLoader` (`runtime/plugins/loader.py`, ADR 0017) discovers
+`plugin.py` files under `plugins/` and registers them at
+`Runtime.start()` — no configuration flag, since discovery alone has no
+side effect. `plugins/engineering_workflow/` is the first plugin loaded
+this way. `Plugin.register(registry)` is now the real distribution
+mechanism for tools and skills (ADR 0013), not a hook nothing calls. A
+plugin that contributes a `Tool` (as opposed to only a `Skill`) is the
+next pressure test — it would act under whatever `PermissionPolicy` a
+deployment has configured, which the first plugin's skill-only shape
+deliberately did not need to reckon with.
 
 ### 4. First real tools and skills — shipped
 
@@ -107,9 +133,12 @@ timed, and observable from day one, exactly as the pipeline promised.
 `PermissionPolicy` this milestone anticipated: `AllowAllPolicy` stopped
 being honest the moment a tool could genuinely act on the world.
 Per-tool user confirmation remains open — a `before_tool` `AssistantHook`
-is the seam for it, not a new mechanism. Skills remain unstarted; the
-first genuine skill (as opposed to a tool) is the next piece of this
-item.
+is the seam for it, not a new mechanism. Skills shipped too:
+`EngineeringWorkflowSkill` (`plugins/engineering_workflow/`, ADR 0017)
+is the first genuine skill, teaching a safe order of operations over
+the tool suite above. A skill whose `applies_to` opts in automatically,
+rather than only activating when a request names it, is the next piece
+of this item.
 
 ### 5. Richer interfaces
 
@@ -123,5 +152,8 @@ everything else fits behind `handle` as it stands.
 - **Lint/format tooling** — the codebase is hand-consistent; if drift
   appears as more contributors (human or AI) join, adopt ruff as a
   dev-only dependency via an ADR amending the dependency convention.
-- **CI** — `pip install -e ".[dev]" && pytest` is the whole gate; wire
-  it to whichever host the repository lands on.
+- **CI** — shipped: `.github/workflows/ci.yml` runs `pip install
+  -e ".[dev]" && pytest` on every push to `master` and every pull
+  request, against Python 3.12 and 3.13 — the same gate `README.md`
+  documents for local development, now enforced on the host the
+  repository actually lands on (GitHub).

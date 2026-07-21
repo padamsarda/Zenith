@@ -209,9 +209,12 @@ Session lifecycle methods keep task and session in lockstep:
 
 `AssignmentPolicy` (`orchestration/policy.py`) is the seam for "which
 AI should do this?". The default `FirstAvailablePolicy` allows one open
-session per account and picks the first free one; smarter policies
-(cost, capability, past performance) replace the class without touching
-the dispatcher.
+session per account and picks the first free one. `ConcurrencyLimitedPolicy`
+generalizes that to a configurable cap per `provider_id` — counted
+across every account on that provider, since some providers can
+genuinely run several sessions at once and others exactly one. Further
+policies (cost, capability, past performance) replace either class
+without touching the dispatcher.
 
 ### The execution engine (ADR 0008)
 
@@ -233,8 +236,17 @@ deterministic `tick()` advances the whole system in a fixed order:
 3. **Retry** every `FAILED` task the `RetryPolicy` approves
    (`orchestration/retry.py`; default `LimitedRetryPolicy`, three
    attempts, counted from the persisted session history — never
-   stored). Exhausted tasks stay `FAILED` for a human, announced once
-   via `AttentionRequired`.
+   stored). `ExponentialBackoffRetryPolicy` adds failure-aware backoff
+   on top of the same attempt budget: it declines a retry, not just
+   once attempts run out, but also until `base_delay * multiplier **
+   (attempt - 1)` has elapsed since the most recent failure — no engine
+   change needed, since `tick()` already re-evaluates every `FAILED`
+   task on every interval, which is exactly what backoff needs. (Its
+   `clock` must agree with real session timestamps unless the `Session`
+   objects it is given were built to match a scripted one — `Dispatcher`
+   always stamps `ended_at` with the real clock, not the engine's own
+   injectable one.) Exhausted tasks stay `FAILED` for a human, announced
+   once via `AttentionRequired`.
 4. **Dispatch** eligible tasks until none remain or accounts saturate.
 
 `tick()` returns a frozen `TickReport` of everything that moved.

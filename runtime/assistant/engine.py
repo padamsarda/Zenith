@@ -95,7 +95,7 @@ class AssistantEngine:
                 )
         try:
             validate_request(request)
-            conversation = application_context.conversations.get(request.conversation_id)
+            application_context.conversations.get(request.conversation_id)
             provider = self._resolve_provider(request, application_context)
             request.transition_to(RequestStatus.RUNNING)
             self._record(request, MessageRole.USER, request.text, application_context)
@@ -107,6 +107,13 @@ class AssistantEngine:
         while turns < max_turns:
             turns += 1
             try:
+                # Re-fetched every turn, not held across the loop: a
+                # ConversationStore is durable state (ADR 0010), and a
+                # backend that reconstructs Conversation objects from
+                # storage (e.g. SQLiteConversationStore) would otherwise
+                # hand the provider a brief missing every message
+                # appended since the loop's first fetch.
+                conversation = application_context.conversations.get(request.conversation_id)
                 brief = self._assembler.assemble(request, conversation, application_context)
                 turn = provider.generate_turn(brief)
                 validate_turn(turn)
