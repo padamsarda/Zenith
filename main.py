@@ -13,12 +13,17 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from runtime.assistant.confirmation import ConfirmationHook
 from runtime.assistant.memory_capture import MemoryCaptureHook
 from runtime.assistant.permissions import ToolAllowlistPolicy
+from runtime.conversation.events import ConversationArchived
 from runtime.memory.sqlite.store import SQLiteMemoryStore
 from runtime.providers.claude import API_KEY_ENV_VAR, ClaudeProvider
+from runtime.reflection.reflector import ProviderReflector
+from runtime.reflection.service import ReflectionService
+from runtime.reflection.sqlite.store import SQLiteReflectionStore
 from runtime.runtime import Runtime
 from runtime.tools.app_control import AppControlTool
 from runtime.tools.app_launcher import AppLauncherTool
@@ -27,11 +32,14 @@ from runtime.tools.filesystem import FilesystemTool
 from runtime.tools.git import GitTool
 from runtime.tools.media_control import MediaControlTool
 from runtime.tools.memory_tool import MemoryTool
+from runtime.tools.reflection_tool import ReflectionTool
 from runtime.tools.shell import ShellTool
 from runtime.tools.test_runner import TestRunnerTool
 
 if TYPE_CHECKING:
     from runtime.context import ApplicationContext
+    from runtime.providers.base import AssistantProvider
+    from shared.events.event import Event
 
 # Zeni's durable state lives beside the Engineering Manager's, under one
 # per-user directory rather than in whatever folder it happened to be
@@ -39,6 +47,11 @@ if TYPE_CHECKING:
 # be memory.
 STATE_DIR = Path.home() / ".zenith"
 MEMORY_DB_PATH = STATE_DIR / "memory.db"
+# Reflections live in their own database, not beside memories: they are
+# derived, regenerable, and deletable, and keeping them separate means
+# rebuilding the derived layer can never put the raw one at risk
+# (ADR 0029).
+REFLECTION_DB_PATH = STATE_DIR / "reflections.db"
 
 # Every tool_id registered by _wire_zeni, in one place so the allowlist
 # can never drift from what was actually registered.
@@ -52,7 +65,44 @@ TOOL_IDS = (
     "app_control",
     "media_control",
     "memory",
+    "reflection",
 )
+
+
+def _wire_reflection(
+    context: ApplicationContext, provider: AssistantProvider
+) -> ReflectionService:
+    """Connect the three reflection triggers, and return the service (ADR 0029).
+
+    - **Session** subscribes to `ConversationArchived`, so a finished
+      conversation is summarized without any interface knowing that
+      reflection exists — `ConsoleInterface` keeps owning nothing but
+      line I/O (ADR 0012).
+    - **Deep** is checked once here, at startup. The runtime has no
+      scheduler (ADR 0007), and for something started daily this
+      approximates "every day or few days" closely enough to be honest
+      about; a long-running deployment would need a real trigger.
+    - **On demand** needs no wiring: it is `ReflectionTool`, registered
+      alongside the rest of the suite.
+    """
+    service = ReflectionService(ProviderReflector(provider))
+
+    def on_archived(event: Event) -> None:
+        service.on_conversation_archived(UUID(event.payload["conversation_id"]), context)
+
+    context.events.subscribe(ConversationArchived, on_archived)
+
+    # Best-effort and non-blocking to startup: a deep reflection that
+    # fails, or a provider that is unreachable, must never stop Zeni
+    # starting.
+    try:
+        if service.is_deep_reflection_due(context):
+            context.logger.info("Deep reflection is due; running it now.")
+            service.reflect_deeply(context)
+    except Exception:
+        context.logger.warning("Startup deep reflection failed.", exc_info=True)
+
+    return service
 
 
 def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
@@ -79,13 +129,17 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
         )
         return
 
-    context.assistant_providers.register(ClaudeProvider())
+    provider = ClaudeProvider()
+    context.assistant_providers.register(provider)
 
     # Durable memory replaces the in-memory default before anything can
     # write to it. Recall is automatic from here on: the assembler pulls
     # relevant memories into every brief, and MemoryCaptureHook stores
     # what is worth keeping (ADR 0027).
     context.memory = SQLiteMemoryStore(MEMORY_DB_PATH)
+    context.reflections = SQLiteReflectionStore(REFLECTION_DB_PATH)
+
+    reflection_service = _wire_reflection(context, provider)
 
     context.tools.register(FilesystemTool(workspace), context)
     context.tools.register(ShellTool(workspace), context)
@@ -96,6 +150,7 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
     context.tools.register(AppControlTool(), context)
     context.tools.register(MediaControlTool(), context)
     context.tools.register(MemoryTool(), context)
+    context.tools.register(ReflectionTool(reflection_service), context)
 
     context.assistant.set_permission_policy(ToolAllowlistPolicy(TOOL_IDS))
     context.assistant.add_hook(ConfirmationHook())

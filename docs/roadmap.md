@@ -363,18 +363,32 @@ needs real semantics, and is the natural home for a model-assisted
 `ConsolidationPolicy` behind the same seam, where the cost and risk are
 opted into rather than paid by default.
 
-### 10. Reflection and synthesis — next
+### 10. Reflection and synthesis — shipped
 
-The remaining half of what the memory literature calls consolidation:
-Stanford's Generative Agents periodically synthesize clusters of related
-memories into higher-level insights ("I have asked about CubeSat power
-budgets eleven times → the power subsystem is my current focus"), which
-is what lets an assistant answer questions no single stored memory
-covers. Everything needed is in place — `MemoryStore.list`, the
-`ConsolidationPolicy` seam, and a provider — but unlike everything
-shipped so far this genuinely requires model calls, so it needs a
-decision about when they run (on a schedule, at session end, on demand)
-and what they cost.
+`runtime/reflection/` (ADR 0029, `docs/reflection.md`) — the remaining
+half of what the memory literature calls consolidation, at three levels:
+a shallow summary when a meaningful conversation ends, a periodic deep
+synthesis across everything accumulated, and a fresh analysis whenever
+the user asks. Reflections are a **derived layer above memory, never a
+modification of it**: separate type, separate store, separate database
+file, raw memories untouched, every insight carrying the IDs of the
+memories that produced it. Deep reflections are versioned into
+generations rather than overwritten, so how Zeni's understanding evolved
+is itself inspectable.
+
+Every prompt permits replying `NOTHING`, and thresholds (3 memories for
+a session, 15 accumulated for a deep pass) stop it firing on thin
+material — without both, every scheduled run manufactures an insight,
+which is how a reflection layer becomes noise.
+
+Still open: **reflections are not recalled into briefs** — readable via
+`ReflectionTool`, but the assembler does not inject them the way it
+injects memories, since a stale deep reflection competing with fresh
+memories for brief space could easily make things worse. **Deep
+reflection triggers at startup only**, because the runtime has no
+scheduler (ADR 0007); a deployment that never restarts never reflects
+deeply. And nothing yet links reflections to each other or to derived
+semantic memories.
 
 ### 11. App control: list, switch, close — shipped
 

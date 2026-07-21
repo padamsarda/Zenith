@@ -175,6 +175,7 @@ and 3.13 on every push to `master` and every pull request.
 - [`docs/architecture.md`](docs/architecture.md) — Zenith runtime internals.
 - [`docs/assistant.md`](docs/assistant.md) — the assistant runtime: conversations, capabilities, providers, and the request pipeline.
 - [`docs/memory.md`](docs/memory.md) — Zeni's long-term memory: what it stores, how it recalls, and what it deliberately does not remember.
+- [`docs/reflection.md`](docs/reflection.md) — what Zeni concludes from what it remembers: three levels of reflection, with provenance back to the evidence.
 - [`docs/engineering_manager.md`](docs/engineering_manager.md) — Engineering Manager architecture.
 - [`docs/events.md`](docs/events.md) — the shared event system.
 - [`docs/commands.md`](docs/commands.md) — the command execution framework.

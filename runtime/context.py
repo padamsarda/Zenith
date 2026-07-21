@@ -16,6 +16,8 @@ from runtime.conversation.store import ConversationStore
 from runtime.memory.in_memory_store import InMemoryMemoryStore
 from runtime.memory.store import MemoryStore
 from runtime.plugins.registry import PluginRegistry
+from runtime.reflection.in_memory_store import InMemoryReflectionStore
+from runtime.reflection.store import ReflectionStore
 from runtime.providers.registry import AssistantProviderRegistry
 from runtime.registry import ServiceRegistry
 from runtime.state import RuntimeState
@@ -46,6 +48,7 @@ class ApplicationContext:
     plugins: PluginRegistry = field(default_factory=PluginRegistry)
     conversations: ConversationStore = field(default_factory=InMemoryConversationStore)
     memory: MemoryStore = field(default_factory=InMemoryMemoryStore)
+    reflections: ReflectionStore = field(default_factory=InMemoryReflectionStore)
     tools: ToolRegistry = field(default_factory=ToolRegistry)
     skills: SkillRegistry = field(default_factory=SkillRegistry)
     assistant_providers: AssistantProviderRegistry = field(

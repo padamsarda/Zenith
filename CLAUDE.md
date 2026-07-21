@@ -41,7 +41,8 @@ pytest tests/test_em_store.py -q   # one module while iterating
    engineering lifecycle end to end — read this first for anything in
    `engineering_manager/`), `docs/architecture.md` (runtime),
    `docs/assistant.md` (the assistant subsystem), `docs/memory.md`
-   (memory), `docs/engineering_manager.md` (EM), `docs/events.md`,
+   (memory), `docs/reflection.md` (reflection),
+   `docs/engineering_manager.md` (EM), `docs/events.md`,
    `docs/commands.md`, `docs/plugins.md`.
 4. `docs/roadmap.md` — the intended build order; prefer roadmap items
    over invented scope.
@@ -150,7 +151,20 @@ pytest tests/test_em_store.py -q   # one module while iterating
   costs nothing, superseding wrongly destroys a real memory, so
   supersession must require an explicit correction signal and never
   similarity alone.
-- **Anything touching memory must not be able to fail a request.**
+- **New reflection behavior**: `runtime/reflection/` is a layer *above*
+  memory (ADR 0029) and the separation is load-bearing — **reflections
+  must never modify, delete, or replace a `Memory`.** They read memories
+  and write separate records that reference them. A wrong reflection has
+  to stay a recoverable mistake; if it could edit the raw record, "what
+  did I actually tell you" would stop being answerable. Every reflection
+  must carry `source_memory_ids`, and a new `DEEP` one is a new
+  `generation` superseding the last, never an overwrite. Subclass
+  `Reflector` (one method) for a different model or a model-free
+  implementation; change prompts in `prompts.py`, not control flow.
+  Every prompt must permit replying `NOTHING` — without it, every run
+  manufactures an insight.
+- **Anything touching memory or reflection must not be able to fail a
+  request.**
   `MemoryRecaller.recall` and `MemoryCaptureHook` both catch, log, and
   continue — a broken memory subsystem yields an assistant with no
   memory, never a failed request (ADR 0023's rule, applied here).

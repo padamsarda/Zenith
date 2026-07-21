@@ -55,3 +55,4 @@ longer applies or accidentally reversing one that still does.
 - [0026 — App control: listing, switching, and closing running applications](0026-app-control-list-switch-close.md)
 - [0027 — Memory: automatic recall, scored by recency, importance, and relevance](0027-memory-automatic-recall-recency-importance-relevance.md)
 - [0028 — Memory consolidation: merging repeats, correcting facts, pruning the dead](0028-memory-consolidation-and-pruning.md)
+- [0029 — Reflection: three levels, as a derived layer above memory](0029-reflection-as-a-derived-layer-above-memory.md)

@@ -182,6 +182,7 @@ root(s) its deployment allows and registers it explicitly.
 | `AppControlTool` | `app_control` | Lists open windows, switches to one, or closes a running application (ADR 0026). |
 | `MediaControlTool` | `media_control` | Play/pause, skip, mute, and relative volume, by simulating hardware media keys (ADR 0024). |
 | `MemoryTool` | `memory` | Deliberately remember a fact, search further back than the brief, or forget something wrong (ADR 0027). |
+| `ReflectionTool` | `reflection` | A fresh analysis of what has been learned about the user, or a read of past conclusions (ADR 0029). |
 
 `FilesystemTool`, `ShellTool` (`cwd`), `GitTool` (path arguments), and
 `TestRunnerTool` (`path`) all confine their path arguments to a
@@ -541,6 +542,7 @@ Added to `runtime.exceptions`, all rooted at `ZenithError`:
 |---|---|
 | `ConversationError` | `ConversationNotFoundError`, `ConversationValidationError` |
 | `MemoryError_` | `MemoryNotFoundError`, `MemoryValidationError`, `MemoryStoreError` |
+| `ReflectionError` | `ReflectionNotFoundError`, `ReflectionValidationError`, `ReflectionStoreError` |
 | `CapabilityError` | `CapabilityValidationError`, `ToolRegistrationError`, `ToolNotFoundError`, `SkillRegistrationError`, `SkillNotFoundError`, `ToolExecutionError` |
 | `AssistantError` | `AssistantProviderError`, `AssistantProviderRegistrationError`, `AssistantProviderNotFoundError`, `RequestValidationError` |
 

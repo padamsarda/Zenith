@@ -70,6 +70,21 @@ runtime/                       The Zenith assistant runtime.
             database.py           Connection + user_version migrations + FTS5 index.
             serialization.py      Memory <-> row conversion.
             store.py               SQLiteMemoryStore.
+    reflection/                  What Zeni concludes from what it remembers
+                                  (ADR 0029). A layer above memory/, never a
+                                  modification of it.
+        reflection.py            Reflection, ReflectionKind.
+        validation.py            Reflection validation guard functions.
+        prompts.py               The instructions each level reflects under.
+        reflector.py             Reflector ABC, ProviderReflector.
+        service.py               ReflectionService: the three levels and
+                                   when each fires.
+        events.py                Concrete reflection events.
+        store.py                 ReflectionStore (ABC).
+        in_memory_store.py       InMemoryReflectionStore (default).
+        sqlite/                  SQLiteReflectionStore, with a provenance table.
+            database.py           Connection + user_version migrations.
+            store.py               SQLiteReflectionStore.
     capabilities/
         tool.py                  Tool (ABC), ToolParameter.
         skill.py                 Skill (ABC).
@@ -101,6 +116,8 @@ runtime/                       The Zenith assistant runtime.
         app_control.py           AppControlTool: list/switch/close running apps (ADR 0026).
         media_control.py         MediaControlTool: play/pause/skip/mute/volume (ADR 0024).
         memory_tool.py           MemoryTool: deliberate remember/search/forget (ADR 0027).
+        reflection_tool.py       ReflectionTool: on-demand reflection, and
+                                   reading past conclusions (ADR 0029).
     assistant/
         status.py                RequestStatus enum, TERMINAL_STATUSES.
         validation.py            Request and turn guard functions.

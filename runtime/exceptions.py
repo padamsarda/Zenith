@@ -192,6 +192,27 @@ class MemoryStoreError(MemoryError_):
     """
 
 
+class ReflectionError(ZenithError):
+    """Base class for all reflection layer errors."""
+
+
+class ReflectionNotFoundError(ReflectionError):
+    """Raised when looking up or deleting a reflection ID that isn't stored."""
+
+
+class ReflectionValidationError(ReflectionError):
+    """Raised when a Reflection fails structural validation (content,
+    kind, provenance, or generation).
+    """
+
+
+class ReflectionStoreError(ReflectionError):
+    """Raised by a durable `ReflectionStore` for a storage-layer failure —
+    a newer-than-supported schema, or a migration or query that failed.
+    Mirrors `MemoryStoreError`.
+    """
+
+
 class AssistantError(ZenithError):
     """Base class for all assistant pipeline errors."""
 
