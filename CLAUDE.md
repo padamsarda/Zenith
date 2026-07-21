@@ -35,8 +35,10 @@ pytest tests/test_em_store.py -q   # one module while iterating
    They are followed strictly; match the existing code exactly.
 2. `architecture/README.md` and the ADR index — do not contradict an
    accepted ADR; supersede it with a new one if it must change.
-3. The reference doc for the area you touch: `docs/architecture.md`
-   (runtime), `docs/assistant.md` (the assistant subsystem),
+3. The reference doc for the area you touch: `docs/workflow.md` (the
+   engineering lifecycle end to end — read this first for anything in
+   `engineering_manager/`), `docs/architecture.md` (runtime),
+   `docs/assistant.md` (the assistant subsystem),
    `docs/engineering_manager.md` (EM), `docs/events.md`,
    `docs/commands.md`, `docs/plugins.md`.
 4. `docs/roadmap.md` — the intended build order; prefer roadmap items
@@ -72,7 +74,14 @@ pytest tests/test_em_store.py -q   # one module while iterating
   resolved inside your implementation, never stored in the EM. All
   orchestration decisions (resume timing, retries, assignment) belong
   to the `ExecutionEngine` and its policy seams — providers only
-  report facts.
+  report facts. **Reporting `FINISHED` is a claim about work, not about
+  a process exiting.** Before mapping a clean exit onto it, check what
+  the provider said about its own run: `ClaudeCodeProvider` exited 0
+  with `is_error: false` on sessions where every tool call had been
+  denied, and the adapter laundered those no-ops into completed tasks
+  until it started reading `permission_denials` (ADR 0022). The
+  verification gate cannot save you here — a suite that was green
+  before a no-op is green after it.
 - **New assignment policy**: subclass
   `engineering_manager.orchestration.policy.AssignmentPolicy`; the
   dispatcher needs no changes.
@@ -91,8 +100,24 @@ pytest tests/test_em_store.py -q   # one module while iterating
   reaches both the event log and the bus, and extend
   `tests/test_em_events.py`.
 - **New engine behavior**: keep it inside `tick()` (a phase, or logic
-  within one) so it stays deterministic and clock-injectable;
-  `run()` must remain nothing but tick-on-an-interval (ADR 0008).
+  within one) so it stays deterministic and clock-injectable. `run()`
+  is tick-on-an-interval plus one delegated decision — whether to loop
+  again (ADR 0008, narrowed by ADR 0021); never put orchestration in it.
+- **New stopping rule for unattended runs**: subclass
+  `engineering_manager.orchestration.stop.StopCondition` (one method,
+  `should_stop(store) -> str | None`); the engine needs no changes.
+  Decide from the store alone — never from a `TickReport` — and return
+  a reason, not a bool, so callers can report *why* a run ended.
+- **New revision probe**: subclass
+  `engineering_manager.orchestration.revisions.RevisionProbe` (two
+  methods, `current_revision(project)` and
+  `changes_between(project, start, end)`); the dispatcher, the
+  session-closing path, and the report need no changes. Stamping happens
+  at dispatch, so a probe added later cannot measure past runs. Report
+  trouble as `None` — an absent measurement, distinct from a measured
+  `RevisionDiff(0, 0, 0)` — and never raise: a probe observes work that
+  has already succeeded, so it must never turn a completed session into
+  a failed tick (ADR 0023).
 - **New runtime capability**: execute it as a `Command` through
   `CommandExecutor`; new shared state lives on `ApplicationContext`.
 - **New Zenith plugin**: subclass `runtime.plugins.plugin.Plugin`;

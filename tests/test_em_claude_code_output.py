@@ -81,3 +81,65 @@ def test_nonzero_exit_with_no_output_reports_exit_code() -> None:
 
     assert status.state is ProviderSessionState.FAILED
     assert status.detail == "exit code 42"
+
+
+def test_clean_exit_with_permission_denials_is_failed() -> None:
+    """A blocked session claims success; only the denials reveal the truth.
+
+    This is the exact payload shape a `--print` session produces with no
+    permission mode: exit 0, `is_error` false, and a fluent `result`
+    explaining what it *would* have done (ADR 0022).
+    """
+    output = (
+        '{"is_error": false, "result": "The write was blocked; approve it and '
+        'I will create the file.", "permission_denials": '
+        '[{"tool_name": "Write", "tool_use_id": "t1"}]}'
+    )
+
+    status = interpret_exit(output, 0)
+
+    assert status.state is ProviderSessionState.FAILED
+    assert "Write" in status.detail
+    assert "--permission-mode" in status.detail
+
+
+def test_permission_denial_detail_lists_and_elides_many_tools() -> None:
+    denials = ", ".join(
+        f'{{"tool_name": "Tool{index}"}}' for index in range(8)
+    )
+    output = f'{{"is_error": false, "result": "ok", "permission_denials": [{denials}]}}'
+
+    status = interpret_exit(output, 0)
+
+    assert status.state is ProviderSessionState.FAILED
+    assert "Tool0" in status.detail
+    assert "and 3 more" in status.detail
+
+
+def test_empty_permission_denials_list_is_still_finished() -> None:
+    output = '{"is_error": false, "result": "done", "permission_denials": []}'
+
+    status = interpret_exit(output, 0)
+
+    assert status.state is ProviderSessionState.FINISHED
+    assert status.detail == "done"
+
+
+def test_permission_denials_still_report_usage() -> None:
+    output = (
+        '{"is_error": false, "result": "blocked", "total_cost_usd": 0.08, '
+        '"permission_denials": [{"tool_name": "Edit"}]}'
+    )
+
+    status = interpret_exit(output, 0)
+
+    assert status.state is ProviderSessionState.FAILED
+    assert status.usage == {"total_cost_usd": 0.08}
+
+
+def test_malformed_permission_denials_are_ignored() -> None:
+    output = '{"is_error": false, "result": "done", "permission_denials": "nope"}'
+
+    status = interpret_exit(output, 0)
+
+    assert status.state is ProviderSessionState.FINISHED

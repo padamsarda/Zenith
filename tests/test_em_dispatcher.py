@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from engineering_manager.domain.project import Project
 from engineering_manager.domain.states import (
     ProjectStatus,
     SessionStatus,
@@ -14,6 +15,7 @@ from engineering_manager.domain.states import (
 from engineering_manager.domain.task import Task
 from engineering_manager.exceptions import OrchestrationError, ProviderSessionError
 from engineering_manager.orchestration.dispatcher import Dispatcher
+from engineering_manager.orchestration.revisions import RevisionDiff, RevisionProbe
 from engineering_manager.providers.base import (
     Provider,
     SessionHandle,
@@ -24,19 +26,42 @@ from engineering_manager.providers.registry import ProviderRegistry
 from engineering_manager.store.store import Store
 
 
+class ScriptedRevisionProbe(RevisionProbe):
+    """A RevisionProbe that hands out revisions a test scripted in advance.
+
+    Records the projects it was asked about, so a test can assert not
+    just what was stamped but how often the dispatcher looked.
+    """
+
+    def __init__(self, *revisions: str | None) -> None:
+        self._revisions = list(revisions)
+        self.asked_about: list[str] = []
+
+    def current_revision(self, project: Project) -> str | None:
+        self.asked_about.append(project.project_id)
+        return self._revisions.pop(0) if self._revisions else None
+
+    def changes_between(
+        self, project: Project, start_revision: str, end_revision: str
+    ) -> RevisionDiff | None:
+        # The dispatcher stamps revisions; measuring between them belongs
+        # to the report, and calling it here would be a layering mistake.
+        raise AssertionError("The dispatcher must not measure diffs.")
+
+
 class Harness:
     """A Store + InMemoryProvider + Dispatcher wired together for tests."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, revision_probe: RevisionProbe | None = None) -> None:
         self.store = Store(tmp_path / "em.db")
         self.provider = InMemoryProvider()
         self.providers = ProviderRegistry()
         self.providers.register(self.provider)
-        self.dispatcher = Dispatcher(self.store, self.providers)
+        self.dispatcher = Dispatcher(
+            self.store, self.providers, revision_probe=revision_probe
+        )
 
     def add_project(self, project_id: str = "zenith") -> None:
-        from engineering_manager.domain.project import Project
-
         self.store.add_project(
             Project(project_id=project_id, name="Zenith", root_path=Path("."))
         )
@@ -406,3 +431,125 @@ def test_resume_clears_resume_at(harness: Harness) -> None:
 
     assert resumed.resume_at is None
     assert harness.store.get_session(session.session_id).resume_at is None
+
+
+def test_dispatch_stamps_the_starting_revision(tmp_path: Path) -> None:
+    probe = ScriptedRevisionProbe("rev-start")
+    harness = Harness(tmp_path, revision_probe=probe)
+    try:
+        harness.add_project()
+        harness.add_ready_task()
+        harness.add_account()
+
+        session = harness.dispatcher.dispatch()
+
+        assert session.starting_revision == "rev-start"
+        assert harness.store.get_session(session.session_id).starting_revision == "rev-start"
+        assert probe.asked_about == ["zenith"]
+    finally:
+        harness.close()
+
+
+def test_completing_a_session_stamps_the_ending_revision(tmp_path: Path) -> None:
+    probe = ScriptedRevisionProbe("rev-start", "rev-end")
+    harness = Harness(tmp_path, revision_probe=probe)
+    try:
+        harness.add_project()
+        harness.add_ready_task()
+        harness.add_account()
+        session = harness.dispatcher.dispatch()
+
+        completed = harness.dispatcher.complete_session(session.session_id, summary="did it")
+
+        assert completed.starting_revision == "rev-start"
+        assert completed.ending_revision == "rev-end"
+        stored = harness.store.get_session(session.session_id)
+        assert stored.ending_revision == "rev-end"
+        assert stored.summary == "did it"
+    finally:
+        harness.close()
+
+
+def test_failing_a_session_stamps_the_ending_revision(tmp_path: Path) -> None:
+    probe = ScriptedRevisionProbe("rev-start", "rev-end")
+    harness = Harness(tmp_path, revision_probe=probe)
+    try:
+        harness.add_project()
+        harness.add_ready_task()
+        harness.add_account()
+        session = harness.dispatcher.dispatch()
+
+        failed = harness.dispatcher.fail_session(session.session_id, reason="crashed")
+
+        # A failed session's diff is evidence too — often the evidence
+        # that matters most, since it shows what the attempt left behind.
+        assert failed.ending_revision == "rev-end"
+        assert harness.store.get_session(session.session_id).ending_revision == "rev-end"
+    finally:
+        harness.close()
+
+
+def test_abandoning_a_session_stamps_the_ending_revision(tmp_path: Path) -> None:
+    probe = ScriptedRevisionProbe("rev-start", "rev-end")
+    harness = Harness(tmp_path, revision_probe=probe)
+    try:
+        harness.add_project()
+        harness.add_ready_task()
+        harness.add_account()
+        session = harness.dispatcher.dispatch()
+
+        abandoned = harness.dispatcher.abandon_session(session.session_id, reason="stale")
+
+        assert abandoned.ending_revision == "rev-end"
+    finally:
+        harness.close()
+
+
+def test_a_resumed_session_keeps_its_original_starting_revision(tmp_path: Path) -> None:
+    probe = ScriptedRevisionProbe("rev-start", "rev-end")
+    harness = Harness(tmp_path, revision_probe=probe)
+    try:
+        harness.add_project()
+        harness.add_ready_task()
+        harness.add_account()
+        session = harness.dispatcher.dispatch()
+        harness.dispatcher.interrupt_session(session.session_id)
+
+        resumed = harness.dispatcher.resume_session(session.session_id)
+
+        # Resuming must not re-baseline: the diff is measured from where
+        # the work began, not from where it was picked back up. The probe
+        # is consulted at dispatch and at close, nowhere else.
+        assert resumed.starting_revision == "rev-start"
+        assert probe.asked_about == ["zenith"]
+    finally:
+        harness.close()
+
+
+def test_a_probe_that_cannot_read_the_revision_leaves_it_unstamped(tmp_path: Path) -> None:
+    harness = Harness(tmp_path, revision_probe=ScriptedRevisionProbe(None, None))
+    try:
+        harness.add_project()
+        harness.add_ready_task()
+        harness.add_account()
+        session = harness.dispatcher.dispatch()
+
+        completed = harness.dispatcher.complete_session(session.session_id, summary="did it")
+
+        assert completed.starting_revision is None
+        assert completed.ending_revision is None
+        assert completed.summary == "did it"
+    finally:
+        harness.close()
+
+
+def test_the_default_probe_records_no_revisions(harness: Harness) -> None:
+    harness.add_project()
+    harness.add_ready_task()
+    harness.add_account()
+    session = harness.dispatcher.dispatch()
+
+    completed = harness.dispatcher.complete_session(session.session_id)
+
+    assert session.starting_revision is None
+    assert completed.ending_revision is None

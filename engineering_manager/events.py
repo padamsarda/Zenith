@@ -33,6 +33,14 @@ class ProjectStatusChanged(Event):
 
 
 @dataclass(frozen=True)
+class ProjectRelocated(Event):
+    """Emitted when a project is pointed at a different working directory.
+
+    Payload: `project_id`, `from`, `to`.
+    """
+
+
+@dataclass(frozen=True)
 class PlanAdded(Event):
     """Emitted when a goal is recorded as a plan.
 

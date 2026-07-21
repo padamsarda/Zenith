@@ -55,3 +55,33 @@ def test_project_invalid_transition_raises_and_preserves_status(tmp_path: Path) 
     with pytest.raises(DomainValidationError):
         project.transition_to(ProjectStatus.ACTIVE)
     assert project.status is ProjectStatus.ARCHIVED
+
+
+def test_relocate_changes_the_root_path() -> None:
+    project = Project(project_id="zenith", name="Zenith", root_path=Path("/old"))
+
+    project.relocate(Path("/new"))
+
+    assert project.root_path == Path("/new")
+
+
+def test_relocate_rejects_a_non_path() -> None:
+    project = Project(project_id="zenith", name="Zenith", root_path=Path("/old"))
+
+    with pytest.raises(DomainValidationError):
+        project.relocate("/new")  # type: ignore[arg-type]
+
+
+def test_relocate_leaves_every_other_field_alone() -> None:
+    project = Project(
+        project_id="zenith", name="Zenith", root_path=Path("/old"), description="Two apps."
+    )
+    created_at = project.created_at
+
+    project.relocate(Path("/new"))
+
+    assert project.project_id == "zenith"
+    assert project.name == "Zenith"
+    assert project.description == "Two apps."
+    assert project.created_at == created_at
+    assert project.status is ProjectStatus.ACTIVE

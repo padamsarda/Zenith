@@ -8,6 +8,7 @@ from pathlib import Path
 
 from engineering_manager.domain.states import ProjectStatus
 from engineering_manager.domain.validation import validate_project_status_transition
+from engineering_manager.exceptions import DomainValidationError
 from shared.utils.time_utils import utc_now
 
 
@@ -32,6 +33,29 @@ class Project:
     description: str | None = None
     created_at: datetime = field(default_factory=utc_now)
     status: ProjectStatus = ProjectStatus.ACTIVE
+
+    def relocate(self, new_path: Path) -> None:
+        """Point this project at a different working directory.
+
+        The identity of a managed project is its `project_id`, not where
+        it happens to sit on disk (a repository may be moved, re-cloned,
+        or deliberately pointed at a git worktree so autonomous sessions
+        edit a disposable copy). Without this, changing the path meant
+        recreating the project and abandoning its plans, tasks, sessions,
+        and event history — losing exactly the record the Engineering
+        Manager exists to keep.
+
+        A controlled mutator rather than a new object, for the same
+        reason `transition_to` is: the store updates rows in place.
+
+        Raises:
+            DomainValidationError: If `new_path` is not a Path.
+        """
+        if not isinstance(new_path, Path):
+            raise DomainValidationError(
+                f"Project root_path must be a Path, got {type(new_path).__name__}"
+            )
+        object.__setattr__(self, "root_path", new_path)
 
     def transition_to(self, new_status: ProjectStatus) -> None:
         """Move this project to `new_status`.

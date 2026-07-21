@@ -1,16 +1,19 @@
-"""Command handlers for the Engineering Manager CLI.
+"""Command handlers for the Engineering Manager's bookkeeping commands.
 
-Split out from `cli.py` so building the argument parser and executing a
-parsed command are separate responsibilities: `cli.build_parser`
-produces the `argparse.Namespace` this module's `dispatch` acts on.
+The commands a human runs between the approval gates — managing
+projects, plans, tasks, and accounts, and inspecting state.
+`cli_parser.build_parser` produces the `argparse.Namespace` this
+module's `dispatch` acts on; the two commands that actually run the
+execution engine live in `cli_engine.py`.
 """
 
 from __future__ import annotations
 
 import argparse
-import shlex
 from uuid import UUID
 
+from engineering_manager.cli_engine import run_engine, run_workflow_command
+from engineering_manager.cli_workflow import ensure_account
 from engineering_manager.domain.states import TaskStatus
 from engineering_manager.manager import EngineeringManager
 from engineering_manager.orchestration.graph import execution_waves
@@ -18,7 +21,7 @@ from engineering_manager.orchestration.planning import (
     DEFAULT_POLL_INTERVAL_SECONDS,
     PlanningSessionRunner,
 )
-from engineering_manager.orchestration.verification import CommandVerificationPolicy
+from engineering_manager.orchestration.revisions import GitRevisionProbe
 from engineering_manager.providers.claude_code import ClaudeCodeProvider
 
 
@@ -41,7 +44,9 @@ def dispatch(manager: EngineeringManager, args: argparse.Namespace) -> None:
             timestamp = entry.timestamp.isoformat(timespec="seconds")
             print(f"[{timestamp}] {entry.name}: {entry.payload}")
     elif args.command == "run":
-        _run_engine(manager, args)
+        run_engine(manager, args)
+    elif args.command == "workflow":
+        run_workflow_command(manager, args)
 
 
 def _run_project(manager: EngineeringManager, args: argparse.Namespace) -> None:
@@ -54,7 +59,12 @@ def _run_project(manager: EngineeringManager, args: argparse.Namespace) -> None:
     elif args.subcommand == "list":
         for project in manager.list_projects():
             print(f"{project.project_id}  {project.status.name}  {project.name}")
+    elif args.subcommand == "relocate":
+        project = manager.relocate_project(args.project_id, args.path.resolve())
+        print(f"Project '{project.project_id}' now points at {project.root_path}.")
     elif args.subcommand == "report":
+        if args.track_changes:
+            manager.set_revision_probe(GitRevisionProbe())
         report = manager.project_report(args.project_id)
         if args.out:
             args.out.write_text(report, encoding="utf-8")
@@ -74,11 +84,13 @@ def _run_plan(manager: EngineeringManager, args: argparse.Namespace) -> None:
         for plan in manager.list_plans(project_id=args.project):
             print(f"{plan.plan_id}  {plan.status.name:12}  {plan.goal}")
     elif args.subcommand == "show":
-        _print_plan(manager, args.plan_id)
+        _print_plan(manager, args.plan_id, detail=args.detail)
     else:
-        action = {"approve": manager.approve_plan, "cancel": manager.cancel_plan}[
-            args.subcommand
-        ]
+        action = {
+            "approve": manager.approve_plan,
+            "accept": manager.accept_plan,
+            "cancel": manager.cancel_plan,
+        }[args.subcommand]
         plan = action(args.plan_id)
         print(f"Plan {plan.plan_id} is now {plan.status.name}.")
 
@@ -86,6 +98,7 @@ def _run_plan(manager: EngineeringManager, args: argparse.Namespace) -> None:
 def _run_plan_from_goal(manager: EngineeringManager, args: argparse.Namespace) -> None:
     """Register the Claude Code provider and decompose a goal into a plan."""
     manager.register_provider(ClaudeCodeProvider(command=(args.claude_command,)))
+    ensure_account(manager, args.provider, args.account)
     manager.set_planning_runner(
         PlanningSessionRunner(
             manager.providers,
@@ -111,8 +124,13 @@ def _run_plan_from_goal(manager: EngineeringManager, args: argparse.Namespace) -
     print(f"Review with `plan show {plan.plan_id}`, then `plan approve {plan.plan_id}`.")
 
 
-def _print_plan(manager: EngineeringManager, plan_id: UUID) -> None:
-    """Print a plan's goal and its task graph as execution waves."""
+def _print_plan(manager: EngineeringManager, plan_id: UUID, *, detail: bool = False) -> None:
+    """Print a plan's goal and its task graph as execution waves.
+
+    `detail` adds each task's description. Approving a plan is human
+    gate one — consent to what the tasks *say*, not to their titles — so
+    the text a session will actually be given has to be readable here.
+    """
     plan = manager.get_plan(plan_id)
     print(f"Plan {plan.plan_id} [{plan.status.name}]: {plan.goal}")
     if plan.description:
@@ -121,6 +139,44 @@ def _print_plan(manager: EngineeringManager, plan_id: UUID) -> None:
         print(f"Wave {number} (may run in parallel):")
         for task in wave:
             print(f"  {task.task_id}  {task.status.name:12}  p{task.priority}  {task.title}")
+            if detail and task.description:
+                for line in task.description.splitlines():
+                    print(f"      {line}")
+
+
+def _print_task(manager: EngineeringManager, task_id: UUID) -> None:
+    """Print everything durable state holds about one task.
+
+    The task is the unit of work, of dispatch, and of both human gates,
+    but nothing in the CLI could show one: `task list` gave a title and
+    `plan show` gave a graph. Reviewing a single task — before approving
+    it, or after it came back needing review — meant reading the
+    database by hand.
+    """
+    task = manager.get_task(task_id)
+    print(f"Task {task.task_id} [{task.status.name}]  p{task.priority}")
+    print(f"  Project: {task.project_id}")
+    if task.plan_id:
+        print(f"  Plan:    {task.plan_id}")
+    print(f"  Title:   {task.title}")
+    if task.description:
+        print("  Description:")
+        for line in task.description.splitlines():
+            print(f"    {line}")
+    for dependency_id in sorted(task.depends_on, key=str):
+        dependency = manager.get_task(dependency_id)
+        print(f"  Depends on: {dependency_id} [{dependency.status.name}] {dependency.title}")
+    sessions = manager.list_sessions(task_id=task_id)
+    print(f"  Sessions: {len(sessions)}")
+    for session in sessions:
+        started = session.started_at.isoformat(timespec="seconds")
+        print(
+            f"    {session.session_id}  {session.status.name:12}  "
+            f"{session.provider_id}/{session.account_id}  started {started}"
+        )
+        if session.summary:
+            for line in session.summary.splitlines():
+                print(f"      {line}")
 
 
 def _run_task(manager: EngineeringManager, args: argparse.Namespace) -> None:
@@ -138,6 +194,8 @@ def _run_task(manager: EngineeringManager, args: argparse.Namespace) -> None:
     elif args.subcommand == "depend":
         task = manager.add_task_dependency(args.task_id, args.depends_on_id)
         print(f"Task {task.task_id} now depends on {args.depends_on_id}.")
+    elif args.subcommand == "show":
+        _print_task(manager, args.task_id)
     elif args.subcommand == "list":
         status = TaskStatus[args.status] if args.status else None
         for task in manager.list_tasks(project_id=args.project, status=status):
@@ -163,26 +221,6 @@ def _run_account(manager: EngineeringManager, args: argparse.Namespace) -> None:
         for account in manager.list_accounts():
             label = f"  ({account.label})" if account.label else ""
             print(f"{account.provider_id}/{account.account_id}{label}")
-
-
-def _run_engine(manager: EngineeringManager, args: argparse.Namespace) -> None:
-    """Register the Claude Code provider and run the execution engine.
-
-    Accounts must already be registered (`account add claude-code <id>`)
-    for any task to actually dispatch; without one, the engine simply
-    idles, ticking with nothing eligible to run.
-    """
-    manager.register_provider(ClaudeCodeProvider(command=(args.claude_command,)))
-    if args.verify_command:
-        manager.set_verification_policy(
-            CommandVerificationPolicy(
-                tuple(shlex.split(args.verify_command)),
-                timeout_seconds=args.verify_timeout,
-            )
-        )
-        print(f"Verifying completions with: {args.verify_command}")
-    print(f"Running the execution engine every {args.interval}s. Press Ctrl+C to stop.")
-    manager.run(interval_seconds=args.interval, max_ticks=args.max_ticks)
 
 
 def _print_status(manager: EngineeringManager) -> None:

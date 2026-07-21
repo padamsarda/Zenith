@@ -37,6 +37,7 @@ from engineering_manager.events import (
     AccountRemoved,
     PlanDecomposed,
     ProjectAdded,
+    ProjectRelocated,
     ProjectStatusChanged,
     TaskAdded,
     TaskDependencyAdded,
@@ -44,7 +45,7 @@ from engineering_manager.events import (
 )
 from engineering_manager.exceptions import DomainValidationError, OrchestrationError
 from engineering_manager.orchestration.dispatcher import SOURCE, Dispatcher
-from engineering_manager.orchestration.engine import ExecutionEngine, TickReport
+from engineering_manager.orchestration.engine import ExecutionEngine, RunReport, TickReport
 from engineering_manager.orchestration.graph import Blockage, blockages, would_create_cycle
 from engineering_manager.orchestration.planning import PlanningSessionRunner
 from engineering_manager.orchestration.planning_decomposition import parse_decomposition
@@ -52,6 +53,7 @@ from engineering_manager.orchestration.plans import PlanCoordinator
 from engineering_manager.orchestration.policy import AssignmentPolicy
 from engineering_manager.orchestration.report import build_report, render_markdown
 from engineering_manager.orchestration.retry import RetryPolicy
+from engineering_manager.orchestration.revisions import NoRevisionProbe, RevisionProbe
 from engineering_manager.orchestration.verification import VerificationPolicy
 from engineering_manager.providers.base import Provider
 from engineering_manager.providers.registry import ProviderRegistry
@@ -80,6 +82,7 @@ class EngineeringManager:
         policy: AssignmentPolicy | None = None,
         retry_policy: RetryPolicy | None = None,
         verification_policy: VerificationPolicy | None = None,
+        revision_probe: RevisionProbe | None = None,
         bus: EventBus | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -87,8 +90,17 @@ class EngineeringManager:
         self.providers = providers or ProviderRegistry()
         self.events = bus or EventBus()
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
+        # Held as well as injected: the dispatcher stamps revisions with
+        # it, and `project_report` measures the span between them with
+        # the same probe.
+        self._revision_probe = revision_probe or NoRevisionProbe()
         self.dispatcher = Dispatcher(
-            store, self.providers, policy=policy, bus=self.events, logger=self._logger
+            store,
+            self.providers,
+            policy=policy,
+            revision_probe=self._revision_probe,
+            bus=self.events,
+            logger=self._logger,
         )
         self.engine = ExecutionEngine(
             store,
@@ -160,6 +172,33 @@ class EngineeringManager:
         )
         return project
 
+    def relocate_project(self, project_id: str, root_path: Path) -> Project:
+        """Point a managed project at a different working directory.
+
+        Sessions dispatch into whatever path is recorded here, so this is
+        how a project is aimed at a git worktree or a moved checkout
+        without losing its plans, tasks, sessions, or event log.
+
+        Raises:
+            ProjectNotFoundError: If `project_id` is not managed.
+            DomainValidationError: If `root_path` is not a Path.
+        """
+        project = self.store.get_project(project_id)
+        previous = project.root_path
+        project.relocate(root_path)
+        self.store.update_project(project)
+        self._publish(
+            ProjectRelocated(
+                source=SOURCE,
+                payload={
+                    "project_id": project_id,
+                    "from": str(previous),
+                    "to": str(root_path),
+                },
+            )
+        )
+        return project
+
     def get_project(self, project_id: str) -> Project:
         """Return the managed project with `project_id`."""
         return self.store.get_project(project_id)
@@ -176,10 +215,16 @@ class EngineeringManager:
         — the "what happened while I was away" a human needs after
         leaving the engine running unattended.
 
+        Completed work also shows what each session changed in the
+        repository, whenever this manager was given a `RevisionProbe`
+        that can measure it.
+
         Raises:
             ProjectNotFoundError: If `project_id` is not managed.
         """
-        return render_markdown(build_report(self.store, project_id))
+        return render_markdown(
+            build_report(self.store, project_id, revision_probe=self._revision_probe)
+        )
 
     # -- plans -------------------------------------------------------------
 
@@ -277,6 +322,10 @@ class EngineeringManager:
     def approve_plan(self, plan_id: UUID) -> Plan:
         """Human gate one, in bulk: approve a plan and its DRAFT tasks."""
         return self._plans.approve_plan(plan_id)
+
+    def accept_plan(self, plan_id: UUID) -> Plan:
+        """Human gate two, in bulk: accept a plan's reviewed tasks as DONE."""
+        return self._plans.accept_plan(plan_id)
 
     def cancel_plan(self, plan_id: UUID) -> Plan:
         """Cancel a plan and every one of its non-terminal tasks."""
@@ -499,6 +548,16 @@ class EngineeringManager:
 
     # -- execution ---------------------------------------------------------
 
+    def set_revision_probe(self, probe: RevisionProbe) -> None:
+        """Replace the probe used to stamp and measure session revisions.
+
+        Sets it on the dispatcher (which stamps) and here (where
+        `project_report` measures), so the two can never disagree about
+        how a revision was recorded and how it is being read back.
+        """
+        self._revision_probe = probe
+        self.dispatcher.set_revision_probe(probe)
+
     def set_verification_policy(self, policy: VerificationPolicy) -> None:
         """Replace the policy that checks a session's claimed completion."""
         self.engine.set_verification_policy(policy)
@@ -507,9 +566,9 @@ class EngineeringManager:
         """Advance every session, task, and plan one deterministic step."""
         return self.engine.tick()
 
-    def run(self, **kwargs: object) -> None:
+    def run(self, **kwargs: object) -> RunReport:
         """Run the execution engine's polling loop. See `ExecutionEngine.run`."""
-        self.engine.run(**kwargs)  # type: ignore[arg-type]
+        return self.engine.run(**kwargs)  # type: ignore[arg-type]
 
     def blocked_tasks(self, project_id: str | None = None) -> list[Blockage]:
         """Report tasks whose dependencies hold them back — or doom them."""

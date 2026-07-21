@@ -531,3 +531,25 @@ def test_project_report_renders_markdown_from_live_state(
 def test_project_report_raises_on_project_not_found(manager: EngineeringManager) -> None:
     with pytest.raises(ProjectNotFoundError):
         manager.project_report("nope")
+
+
+def test_accept_plan_closes_every_reviewed_task_at_once(
+    manager: EngineeringManager, tmp_path: Path
+) -> None:
+    from engineering_manager.domain.states import PlanStatus
+
+    manager.add_project("zenith", "Zenith", tmp_path)
+    manager.add_account("in-memory", "personal")
+    plan = manager.add_plan("zenith", "Ship plugins")
+    first = manager.add_task("zenith", "Write the loader", plan_id=plan.plan_id)
+    second = manager.add_task("zenith", "Document it", plan_id=plan.plan_id)
+    manager.approve_plan(plan.plan_id)
+    for _ in (first, second):
+        session = manager.dispatch()
+        manager.complete_session(session.session_id, summary="done")
+
+    manager.accept_plan(plan.plan_id)
+
+    assert manager.get_task(first.task_id).status is TaskStatus.DONE
+    assert manager.get_task(second.task_id).status is TaskStatus.DONE
+    assert manager.get_plan(plan.plan_id).status is PlanStatus.COMPLETED

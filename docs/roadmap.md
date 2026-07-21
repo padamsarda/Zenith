@@ -67,15 +67,59 @@ When the engine loop and CLI can write concurrently: a unit-of-work
 `busy_timeout`, and possibly a join table for dependencies if SQL-side
 queries become useful (ADR 0004 anticipates all three).
 
-### 5. Zenith as a managed project
+### 5. Zenith as a managed project — shipped
 
-The closing of the loop: a `zenith` project whose plans are Zenith
-milestones, dispatched to providers by the Engineering Manager. No new
-mechanism is expected — this is dogfooding, and the friction it finds
-feeds items 1–4. Items 6 and 7 below (verification, reports) are
-exactly the hardening this dogfooding would otherwise discover the hard
-way — landing them first means the first real dogfood run has something
-to trust and something to read afterward.
+Done, and it earned its place at the top of this list. A `zenith`
+project was registered, a real `ClaudeCodeProvider` planning session
+decomposed a goal into a five-task dependency graph, and dispatched
+sessions built the feature — verified by `python -m pytest` between
+tasks, accepted at gate two, reported at the end. The mechanism needed
+no redesign, exactly as predicted.
+
+What it found was not orchestration bugs. It was that the *provider
+boundary* had never been exercised against real work:
+
+1. **Sessions could not act, and said they had.** `claude --print` runs
+   with no stdin, so every edit was denied; the process still exited 0
+   with `is_error: false`, which the adapter reported as `FINISHED`. Six
+   sessions were recorded as successful completions of an untouched
+   repository. ADR 0022 fixes both halves — denials fail loudly,
+   `--permission-mode` grants authority explicitly.
+2. **`acceptEdits` is a trap.** It permits file edits but not commands,
+   and engineering means running the test suite. Unattended runs need
+   `bypassPermissions`; `docs/workflow.md` now says so with a table
+   instead of leaving it to be discovered over six failed sessions.
+3. **Gate one was unreviewable.** `plan show` printed titles, and no
+   `task show` existed — so approving a decomposition meant consenting
+   to text the CLI would not display. Fixed with `plan show --detail`
+   and `task show`.
+4. **`plan from-goal --account X` left X unregistered**, reproducing the
+   exact idle-forever failure ADR 0021 removed from `workflow`. It now
+   registers the account, and `run` refuses to start when no account
+   could ever dispatch.
+5. **A project could not be relocated**, so aiming one at a disposable
+   git worktree — the sane way to contain `bypassPermissions` — meant
+   recreating it and abandoning its history. `project relocate` fixes
+   it.
+6. **A long session narrated nothing.** ADR 0021 taught `run` to log
+   what each tick moved, but a tick spanning a ten-minute session moves
+   nothing, so the terminal was silent and indistinguishable from a
+   hang. `TickReport.sessions_running` gives the loop a liveness line.
+7. **A failed run did not say why.** The report listed FAILED counts and
+   "retries exhausted" without the reason any of it happened, sending a
+   human back to the logs the report exists to replace. It now has a
+   Failed Work section carrying each task's last failure reason.
+
+Still open, and discovered here: **a deterministic failure still burns
+the whole retry budget.** A permission denial cannot succeed on retry,
+yet the policy spent three attempts per task proving it — six paid
+sessions. The `RetryPolicy` seam can express this, but doing it honestly
+needs the provider to *say* a failure is non-retryable rather than the
+policy sniffing summary text, which means a field on
+`ProviderSessionStatus` and one on `Session` to persist it. That is a
+concrete domain change, not just a policy, so it is deferred rather than
+half-built — the same reasoning applied to capability-aware assignment
+in item 3.
 
 ### 6. A verification gate before NEEDS_REVIEW — shipped
 
@@ -95,9 +139,49 @@ Also not originally on this list: after a long unattended run, nothing
 composed "what happened" into something a human reads once, start to
 finish — only the CLI's `status`/`log`, or subscribing to the bus.
 `manager.project_report` (`orchestration/report.py`) renders a Markdown
-report from durable state (plans, task breakdown, work needing review,
-blockages, recent attention, session outcomes); `project report
-<id> [--out PATH]` in the CLI.
+report from durable state (plans, task breakdown, completed work,
+work needing review, blockages, recent attention, session outcomes);
+`project report <id> [--out PATH]` in the CLI, and written
+automatically at the end of every `workflow` run.
+
+### 8. One coherent lifecycle, not a collection of commands — shipped
+
+Every step existed; the journey between them did not. Walking the
+documented quickstart exactly as written showed it could not be
+completed by anyone: `account add` was an undocumented prerequisite,
+`run` never returned (its only bound counted loop iterations, not
+work) and printed nothing, and gate two had no bulk form, so a plan
+could never reach `COMPLETED`.
+
+ADR 0021 closes this by composition, not new machinery.
+`StopCondition` (`orchestration/stop.py`) gives `run` a termination
+policy shaped like the existing seams — `RunForever` keeps the old
+behavior, `WhenQuiescent`/`WhenPlanSettled` stop once nothing can
+advance without a human — and `run` now returns a `RunReport` that
+distinguishes settled from exhausted from interrupted. `accept_plan`
+supplies the bulk gate two that mirrors `approve_plan`. `workflow`
+(`cli_workflow.py`) calls the existing facade methods in the order the
+lifecycle already implied, pausing at both gates.
+
+Running it end to end is what found the one genuinely structural
+problem: gate two is what makes a task `DONE`, and dependents are not
+eligible until it is, so "execute to quiescence, then accept" stalls
+every plan deeper than one wave. The fix was where the gate happens,
+not whether — the workflow alternates execution with acceptance, and
+the engine still cannot accept its own work.
+
+`InMemoryProvider(finish_after_checks=...)` makes the whole lifecycle
+runnable with no external process, so the documented workflow
+(`docs/workflow.md`) is something a new contributor can actually
+execute, and so it is covered end to end by
+`tests/test_em_cli_workflow.py`.
+
+Still open: nothing yet writes engineering artifacts *other than* the
+report — a diff, a changelog entry, or a per-task record of what
+changed would make the trail richer, and the session summaries needed
+for it are already durable. Progress is reported per round rather than
+live during a long tick, which is fine for a 30-second interval and
+would not be for a 30-minute one.
 
 ## Zenith runtime
 

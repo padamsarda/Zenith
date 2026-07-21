@@ -19,6 +19,7 @@ from engineering_manager.orchestration.engine import (
     TickReport,
 )
 from engineering_manager.orchestration.retry import LimitedRetryPolicy
+from engineering_manager.orchestration.stop import WhenQuiescent
 from engineering_manager.orchestration.verification import (
     VerificationPolicy,
     VerificationResult,
@@ -410,3 +411,111 @@ def test_run_stops_cleanly_on_keyboard_interrupt(harness: Harness) -> None:
     harness.engine.run(interval_seconds=1.0, max_ticks=10, sleep=interrupt)
 
     assert len(harness.store.list_sessions()) == 1
+
+
+def test_run_reports_the_tick_budget_it_used(harness: Harness) -> None:
+    harness.add_ready_task()
+
+    report = harness.engine.run(interval_seconds=0.0, max_ticks=3, sleep=lambda _: None)
+
+    assert report.ticks == 3
+    assert not report.settled
+    assert not report.interrupted_by_user
+
+
+def test_run_reports_a_keyboard_interrupt(harness: Harness) -> None:
+    def interrupt(_: float) -> None:
+        raise KeyboardInterrupt
+
+    harness.add_ready_task()
+
+    report = harness.engine.run(interval_seconds=1.0, max_ticks=10, sleep=interrupt)
+
+    assert report.interrupted_by_user
+    assert not report.settled
+
+
+def test_run_without_a_stop_condition_ticks_the_whole_budget(harness: Harness) -> None:
+    """The historical behavior, preserved when `until` is omitted."""
+    report = harness.engine.run(interval_seconds=0.0, max_ticks=4, sleep=lambda _: None)
+
+    assert report.ticks == 4
+    assert report.stopped_because is None
+
+
+def test_run_stops_early_when_the_condition_is_met(harness: Harness) -> None:
+    report = harness.engine.run(
+        interval_seconds=0.0,
+        max_ticks=50,
+        until=WhenQuiescent(),
+        sleep=lambda _: None,
+    )
+
+    assert report.ticks == 1
+    assert report.settled
+    assert report.stopped_because is not None
+
+
+def test_run_keeps_ticking_while_the_condition_is_unmet(harness: Harness) -> None:
+    """A dispatched task keeps the loop alive until its session resolves."""
+    task = harness.add_ready_task()
+
+    report = harness.engine.run(
+        interval_seconds=0.0,
+        max_ticks=3,
+        until=WhenQuiescent(),
+        sleep=lambda _: None,
+    )
+
+    assert report.ticks == 3
+    assert not report.settled
+    assert harness.store.get_task(task.task_id).status is TaskStatus.IN_PROGRESS
+
+
+def test_run_settles_once_work_reaches_review(harness: Harness) -> None:
+    harness.add_ready_task()
+    harness.engine.tick()
+    session_id = harness.store.list_sessions()[0].session_id
+    harness.script(session_id, ProviderSessionState.FINISHED, detail="Done.")
+
+    report = harness.engine.run(
+        interval_seconds=0.0,
+        max_ticks=50,
+        until=WhenQuiescent(),
+        sleep=lambda _: None,
+    )
+
+    assert report.settled
+    assert report.ticks == 1
+
+
+
+def test_tick_reports_sessions_still_running(harness: Harness) -> None:
+    """A session that has not finished is a fact the run loop can narrate."""
+    harness.add_ready_task("Long work")
+    started = harness.engine.tick().sessions_started[0]
+    harness.script(started, ProviderSessionState.RUNNING)
+
+    report = harness.engine.tick()
+
+    assert report.sessions_running == (started,)
+
+
+def test_running_sessions_do_not_make_a_tick_non_idle(harness: Harness) -> None:
+    """`idle` must keep meaning "nothing moved", or callers break."""
+    harness.add_ready_task("Long work")
+    started = harness.engine.tick().sessions_started[0]
+    harness.script(started, ProviderSessionState.RUNNING)
+
+    assert harness.engine.tick().idle is True
+
+
+def test_finished_sessions_are_not_reported_as_running(harness: Harness) -> None:
+    harness.add_ready_task("Quick work")
+    started = harness.engine.tick().sessions_started[0]
+    harness.script(started, ProviderSessionState.FINISHED)
+
+    report = harness.engine.tick()
+
+    assert report.sessions_running == ()
+    assert report.sessions_completed == (started,)

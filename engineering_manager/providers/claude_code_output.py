@@ -13,6 +13,10 @@ from typing import Any
 from engineering_manager.providers.base import ProviderSessionState, ProviderSessionStatus
 from engineering_tools.watchdog.watchdog import SESSION_LIMIT_MARKER, parse_reset_time
 
+# How many blocked tool names to name in a denial detail before eliding
+# the rest — enough to diagnose, short enough to read in a report line.
+MAX_REPORTED_DENIALS = 5
+
 
 def interpret_exit(output: str, exit_code: int) -> ProviderSessionStatus:
     """Turn a finished subprocess's captured output and exit code into a status."""
@@ -28,6 +32,14 @@ def _parse_success(output: str) -> ProviderSessionStatus:
     bad prompt, a tool error the model could not recover from) as
     `is_error: true` inside an otherwise successful process exit —
     distinct from the process crashing outright.
+
+    A session whose tool calls were *denied* is the third case, and the
+    most dangerous, because nothing else in the payload marks it: the
+    process exits 0, `is_error` is false, and the final message is a
+    fluent explanation of what the model would have done. Trusting that
+    as FINISHED records a task as complete when the repository was never
+    touched — and it survives the verification gate too, since a suite
+    that passed before a no-op still passes after it (ADR 0022).
     """
     payload = _parse_json_result(output)
     if payload is None:
@@ -41,10 +53,47 @@ def _parse_success(output: str) -> ProviderSessionStatus:
             detail=str(payload.get("result") or "Claude Code reported an error."),
             usage=usage,
         )
+    denied = _denied_tools(payload)
+    if denied:
+        return ProviderSessionStatus(
+            state=ProviderSessionState.FAILED, detail=_denial_detail(denied), usage=usage
+        )
     return ProviderSessionStatus(
         state=ProviderSessionState.FINISHED,
         detail=str(payload.get("result", output.strip())),
         usage=usage,
+    )
+
+
+def _denied_tools(payload: dict[str, Any]) -> list[str]:
+    """Names of the tools Claude Code was refused permission to use."""
+    denials = payload.get("permission_denials")
+    if not isinstance(denials, list):
+        return []
+    return [
+        str(denial.get("tool_name", "unknown"))
+        for denial in denials
+        if isinstance(denial, dict)
+    ]
+
+
+def _denial_detail(denied: list[str]) -> str:
+    """Explain a permission-blocked session, and how to unblock it.
+
+    The detail becomes the session's failure reason, so it is what a
+    human reads in the engineering report and what `ContextAssembler`
+    feeds to the next attempt. Both are better served by naming the
+    remedy than by restating the symptom.
+    """
+    shown = denied[:MAX_REPORTED_DENIALS]
+    listed = ", ".join(shown)
+    if len(denied) > len(shown):
+        listed += f", and {len(denied) - len(shown)} more"
+    return (
+        f"Claude Code was denied permission to use: {listed}. "
+        "The session could not change the repository, so its completion "
+        "claim is not trustworthy. Grant the session authority to act "
+        "with --permission-mode (e.g. acceptEdits)."
     )
 
 

@@ -80,22 +80,40 @@ integrated. Swapping in a real one is configuration
 
 ## Running the Engineering Manager
 
+One objective, from a sentence to a finished, reviewed, reported change:
+
 ```bash
 python -m engineering_manager project add zenith "Zenith" --path .
-python -m engineering_manager plan from-goal zenith "Ship plugin support" --account personal
-python -m engineering_manager plan show <plan-id>       # review the AI-drafted tasks
-python -m engineering_manager plan approve <plan-id>
-python -m engineering_manager run --verify-command "python -m pytest"
-python -m engineering_manager project report zenith
+python -m engineering_manager workflow zenith "Add a --json flag to status" \
+    --account personal --verify-command "python -m pytest"
 ```
 
-`plan from-goal` asks a provider to decompose the goal into a reviewable
-`DRAFT` plan; `run --verify-command` checks a claimed completion before
-trusting it, instead of taking a provider's word for it; `project
-report` renders what happened while the engine ran. State persists in
-`~/.zenith/engineering_manager.db` (override with `--db`). See
-[`docs/engineering_manager.md`](docs/engineering_manager.md) for the
-architecture and programmatic API, and
+`workflow` runs the whole lifecycle: a provider decomposes the goal into
+a task graph, you approve it, the engine executes it — dispatching,
+retrying, resuming after provider limits, and verifying each claimed
+completion — you accept the finished work, and a Markdown engineering
+report is written beside the database. Ctrl+C is safe at any point;
+`workflow zenith --resume <plan-id>` picks up where it stopped.
+
+To watch the entire lifecycle right now, with no subscription, network,
+or API key — the engineering sessions are simulated, the orchestration
+is real:
+
+```bash
+python -m engineering_manager --db /tmp/demo.db project add demo "Demo" --path .
+python -m engineering_manager --db /tmp/demo.db \
+    workflow demo "Add a health check endpoint" \
+    --provider in-memory --interval 0 --yes --accept
+```
+
+Every step is also a command of its own (`plan from-goal`, `plan
+approve`, `run --until quiescent`, `plan accept`, `project report`) for
+when you want to stop between them. State persists in
+`~/.zenith/engineering_manager.db` (override with `--db`).
+
+Start with [`docs/workflow.md`](docs/workflow.md) — the lifecycle end to
+end. Then [`docs/engineering_manager.md`](docs/engineering_manager.md)
+for the architecture and programmatic API, and
 [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 ## Development
@@ -113,6 +131,7 @@ and 3.13 on every push to `master` and every pull request.
 
 ## Further reading
 
+- [`docs/workflow.md`](docs/workflow.md) — the engineering lifecycle end to end: project, plan, execution, verification, reporting.
 - [`docs/architecture.md`](docs/architecture.md) — Zenith runtime internals.
 - [`docs/assistant.md`](docs/assistant.md) — the assistant runtime: conversations, capabilities, providers, and the request pipeline.
 - [`docs/engineering_manager.md`](docs/engineering_manager.md) — Engineering Manager architecture.

@@ -267,6 +267,47 @@ def test_update_session_persists_close(store: Store, tmp_path: Path) -> None:
     assert stored.ended_at is not None
 
 
+def test_update_session_persists_revisions(store: Store, tmp_path: Path) -> None:
+    store.add_project(make_project(tmp_path))
+    task = Task(project_id="zenith", title="Write docs")
+    store.add_task(task)
+    session = Session(
+        task_id=task.task_id,
+        project_id="zenith",
+        provider_id="in-memory",
+        account_id="personal",
+    )
+    session.stamp_starting_revision("abc123")
+    store.add_session(session)
+
+    session.transition_to(SessionStatus.COMPLETED)
+    session.close(summary="All done", ending_revision="def456")
+    store.update_session(session)
+
+    stored = store.get_session(session.session_id)
+    assert stored.starting_revision == "abc123"
+    assert stored.ending_revision == "def456"
+
+
+def test_add_session_persists_starting_revision(store: Store, tmp_path: Path) -> None:
+    """The dispatcher stamps the baseline before the session is stored,
+    so it must survive the insert, not only a later update."""
+    store.add_project(make_project(tmp_path))
+    task = Task(project_id="zenith", title="Write docs")
+    store.add_task(task)
+    session = Session(
+        task_id=task.task_id,
+        project_id="zenith",
+        provider_id="in-memory",
+        account_id="personal",
+    )
+    session.stamp_starting_revision("abc123")
+
+    store.add_session(session)
+
+    assert store.get_session(session.session_id).starting_revision == "abc123"
+
+
 def test_update_missing_session_raises(store: Store) -> None:
     session = Session(
         task_id=uuid4(), project_id="zenith", provider_id="in-memory", account_id="a"

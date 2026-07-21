@@ -27,6 +27,8 @@ def test_session_defaults() -> None:
     assert session.ended_at is None
     assert session.summary is None
     assert session.resume_at is None
+    assert session.starting_revision is None
+    assert session.ending_revision is None
     assert isinstance(session.session_id, UUID)
     assert session.started_at.tzinfo is not None
 
@@ -142,6 +144,71 @@ def test_update_external_ref_after_close_raises() -> None:
 
     with pytest.raises(DomainValidationError):
         session.update_external_ref("late-ref")
+
+
+def test_stamp_starting_revision_records_the_baseline() -> None:
+    session = make_session()
+
+    session.stamp_starting_revision("abc123")
+
+    assert session.starting_revision == "abc123"
+
+
+def test_stamp_starting_revision_rejects_non_string() -> None:
+    session = make_session()
+
+    with pytest.raises(DomainValidationError):
+        session.stamp_starting_revision(42)  # type: ignore[arg-type]
+
+
+def test_stamp_starting_revision_twice_raises_and_keeps_the_first() -> None:
+    """A resumed session keeps the baseline its diff is measured
+    against; restamping would silently rewrite that history."""
+    session = make_session()
+    session.stamp_starting_revision("abc123")
+
+    with pytest.raises(DomainValidationError):
+        session.stamp_starting_revision("def456")
+    assert session.starting_revision == "abc123"
+
+
+def test_stamp_starting_revision_after_close_raises() -> None:
+    session = make_session()
+    session.transition_to(SessionStatus.COMPLETED)
+    session.close()
+
+    with pytest.raises(DomainValidationError):
+        session.stamp_starting_revision("abc123")
+
+
+def test_close_stamps_ending_revision() -> None:
+    session = make_session()
+    session.stamp_starting_revision("abc123")
+    session.transition_to(SessionStatus.COMPLETED)
+
+    session.close(summary="Implemented the store.", ending_revision="def456")
+
+    assert session.starting_revision == "abc123"
+    assert session.ending_revision == "def456"
+
+
+def test_close_without_ending_revision_leaves_it_unset() -> None:
+    session = make_session()
+    session.transition_to(SessionStatus.COMPLETED)
+
+    session.close(summary="No probe configured.")
+
+    assert session.ending_revision is None
+
+
+def test_close_rejects_non_string_ending_revision_without_closing() -> None:
+    session = make_session()
+    session.transition_to(SessionStatus.COMPLETED)
+
+    with pytest.raises(DomainValidationError):
+        session.close(ending_revision=42)  # type: ignore[arg-type]
+    assert session.ended_at is None
+    assert session.ending_revision is None
 
 
 def test_close_without_summary_keeps_existing_summary() -> None:

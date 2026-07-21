@@ -82,7 +82,46 @@ def test_version_one_database_upgrades_in_place(tmp_path: Path) -> None:
     assert version == SCHEMA_VERSION
     assert "plan_id" in task_columns
     assert "resume_at" in session_columns
+    assert {"starting_revision", "ending_revision"} <= session_columns
     assert project["project_id"] == "zenith"
+
+
+def test_version_two_database_gains_revision_columns_and_keeps_sessions(
+    tmp_path: Path,
+) -> None:
+    """A database created before revision evidence gains the new columns
+    — nullable, so sessions recorded without them still read back."""
+    path = tmp_path / "em.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(MIGRATIONS[0])
+    connection.executescript(MIGRATIONS[1])
+    connection.execute("PRAGMA user_version = 2")
+    connection.execute(
+        "INSERT INTO projects (project_id, name, root_path, status, created_at) "
+        "VALUES ('zenith', 'Zenith', '.', 'ACTIVE', '2026-01-01T00:00:00+00:00')"
+    )
+    connection.execute(
+        "INSERT INTO tasks (task_id, project_id, title, status, created_at) "
+        "VALUES ('t1', 'zenith', 'Write docs', 'DONE', '2026-01-01T00:00:00+00:00')"
+    )
+    connection.execute(
+        "INSERT INTO sessions (session_id, task_id, project_id, provider_id, "
+        "account_id, status, started_at) "
+        "VALUES ('s1', 't1', 'zenith', 'in-memory', 'personal', 'COMPLETED', "
+        "'2026-01-01T00:00:00+00:00')"
+    )
+    connection.commit()
+    connection.close()
+
+    upgraded = open_database(path)
+    version = upgraded.execute("PRAGMA user_version").fetchone()[0]
+    session = upgraded.execute("SELECT * FROM sessions").fetchone()
+    upgraded.close()
+
+    assert version == SCHEMA_VERSION
+    assert session["session_id"] == "s1"
+    assert session["starting_revision"] is None
+    assert session["ending_revision"] is None
 
 
 def test_open_database_enforces_foreign_keys(tmp_path: Path) -> None:

@@ -26,6 +26,7 @@ from engineering_manager.events import SessionStarted, SessionStatusChanged, Tas
 from engineering_manager.exceptions import OrchestrationError, ProviderSessionError
 from engineering_manager.orchestration.context import ContextAssembler
 from engineering_manager.orchestration.policy import AssignmentPolicy, FirstAvailablePolicy
+from engineering_manager.orchestration.revisions import NoRevisionProbe, RevisionProbe
 from engineering_manager.providers.base import SessionHandle, SessionSpec
 from engineering_manager.providers.registry import ProviderRegistry
 from engineering_manager.store.store import Store
@@ -54,6 +55,12 @@ class Dispatcher:
     (`complete_session`, `fail_session`, `interrupt_session`,
     `resume_session`, `abandon_session`) keep the session and its task
     in lockstep from then on.
+
+    The `RevisionProbe` brackets that lifecycle: the project's revision
+    is stamped on the session at dispatch and again when the session
+    closes, so what the session changed can be measured later instead of
+    taken on the provider's word (ADR 0023). It defaults to
+    `NoRevisionProbe`, which records nothing.
     """
 
     def __init__(
@@ -63,6 +70,7 @@ class Dispatcher:
         *,
         policy: AssignmentPolicy | None = None,
         context: ContextAssembler | None = None,
+        revision_probe: RevisionProbe | None = None,
         bus: EventBus | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -70,8 +78,18 @@ class Dispatcher:
         self._providers = providers
         self._policy = policy or FirstAvailablePolicy()
         self._context = context or ContextAssembler(store)
+        self._revision_probe = revision_probe or NoRevisionProbe()
         self._bus = bus or EventBus()
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
+
+    def set_revision_probe(self, probe: RevisionProbe) -> None:
+        """Replace the probe that stamps revisions around each session.
+
+        Mirrors `ExecutionEngine.set_verification_policy`: a caller (the
+        CLI) often only knows which probe it wants once arguments are
+        parsed, by which time the dispatcher already exists.
+        """
+        self._revision_probe = probe
 
     def eligible_tasks(self, project_id: str | None = None) -> list[Task]:
         """Return dispatchable tasks, highest priority first.
@@ -168,6 +186,12 @@ class Dispatcher:
             model=model,
             external_ref=handle.external_ref,
         )
+        # Stamped before the session is stored, so the baseline is part
+        # of the row from the moment it exists rather than an update the
+        # next crash could lose.
+        starting_revision = self._revision_probe.current_revision(project)
+        if starting_revision is not None:
+            session.stamp_starting_revision(starting_revision)
         self._transition_task(task, TaskStatus.IN_PROGRESS)
         self._store.add_session(session)
         self._logger.info(
@@ -328,10 +352,21 @@ class Dispatcher:
     def _end_session(
         self, session: Session, status: SessionStatus, summary: str | None
     ) -> None:
-        """Transition `session` to a terminal `status`, close, persist, publish."""
+        """Transition `session` to a terminal `status`, close, persist, publish.
+
+        Every terminal status is stamped, not just `COMPLETED`: what a
+        failed or abandoned session left behind is exactly as much a fact
+        as what a successful one did, and often a more interesting one.
+        """
+        # Probed before the transition so that a probe breaking its
+        # contract and returning a non-string cannot leave the session
+        # transitioned but unclosed.
+        ending_revision = self._revision_probe.current_revision(
+            self._store.get_project(session.project_id)
+        )
         previous = session.status
         session.transition_to(status)
-        session.close(summary)
+        session.close(summary, ending_revision=ending_revision)
         self._store.update_session(session)
         self._publish_session_change(session, previous)
 

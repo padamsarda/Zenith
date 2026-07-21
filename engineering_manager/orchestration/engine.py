@@ -33,6 +33,7 @@ from engineering_manager.exceptions import (
 )
 from engineering_manager.orchestration.dispatcher import SOURCE, Dispatcher
 from engineering_manager.orchestration.retry import LimitedRetryPolicy, RetryPolicy
+from engineering_manager.orchestration.stop import RunForever, StopCondition
 from engineering_manager.orchestration.verification import (
     NoVerificationPolicy,
     VerificationPolicy,
@@ -70,11 +71,19 @@ class TickReport:
     tasks_retried: tuple[UUID, ...] = ()
     tasks_exhausted: tuple[UUID, ...] = ()
     sessions_started: tuple[UUID, ...] = ()
+    sessions_running: tuple[UUID, ...] = ()
     attention: tuple[str, ...] = ()
 
     @property
     def idle(self) -> bool:
-        """True when the tick found nothing to change."""
+        """True when the tick found nothing to change.
+
+        `sessions_running` deliberately does not count. A tick that
+        observed a session still working changed nothing, and callers
+        that treat `idle` as "nothing moved" must keep reading it that
+        way — the field exists so a run loop can say *something is
+        happening* without pretending something happened.
+        """
         return not (
             self.sessions_completed
             or self.sessions_failed
@@ -83,6 +92,27 @@ class TickReport:
             or self.tasks_retried
             or self.sessions_started
         )
+
+
+@dataclass(frozen=True)
+class RunReport:
+    """How one `ExecutionEngine.run` loop ended.
+
+    An unattended run has three genuinely different endings, and a
+    caller that cannot tell them apart cannot report honestly: the work
+    settled (`stopped_because` is set), the tick budget ran out
+    (neither field set), or a human pressed Ctrl+C
+    (`interrupted_by_user`). Only the first means "finished".
+    """
+
+    ticks: int
+    stopped_because: str | None = None
+    interrupted_by_user: bool = False
+
+    @property
+    def settled(self) -> bool:
+        """True when a stop condition ended the run, rather than a bound."""
+        return self.stopped_because is not None
 
 
 class ExecutionEngine:
@@ -124,7 +154,13 @@ class ExecutionEngine:
     def tick(self) -> TickReport:
         """Advance the system one deterministic step and report what moved."""
         now = self._clock()
-        completed, failed, interrupted, attention = self._reconcile_active_sessions(now)
+        (
+            completed,
+            failed,
+            interrupted,
+            attention,
+            running,
+        ) = self._reconcile_active_sessions(now)
         resumed, resume_failures = self._resume_due_sessions(now)
         failed_this_tick = {
             self._store.get_session(session_id).task_id
@@ -140,6 +176,7 @@ class ExecutionEngine:
             tasks_retried=tuple(retried),
             tasks_exhausted=tuple(exhausted),
             sessions_started=tuple(started),
+            sessions_running=tuple(running),
             attention=tuple((*attention, *retry_attention, *dispatch_attention)),
         )
 
@@ -148,14 +185,24 @@ class ExecutionEngine:
         *,
         interval_seconds: float = DEFAULT_TICK_INTERVAL_SECONDS,
         max_ticks: int | None = None,
+        until: StopCondition | None = None,
         sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        """Tick on an interval until `max_ticks` or a KeyboardInterrupt.
+    ) -> RunReport:
+        """Tick on an interval until `until`, `max_ticks`, or a KeyboardInterrupt.
+
+        `until` defaults to `RunForever`, so omitting it preserves the
+        historical behavior exactly. It is consulted only *between*
+        ticks and reads nothing but the store, so the loop still makes
+        no orchestration decisions of its own — every decision about the
+        work stays inside `tick` (ADR 0008, evolved in ADR 0021).
 
         `sleep` is injectable so tests (and callers with their own
         pacing) never wait on a real clock.
         """
+        condition = until or RunForever()
         ticks = 0
+        reason: str | None = None
+        interrupted_by_user = False
         try:
             while max_ticks is None or ticks < max_ticks:
                 report = self.tick()
@@ -172,23 +219,43 @@ class ExecutionEngine:
                         len(report.tasks_retried),
                         len(report.sessions_started),
                     )
+                elif report.sessions_running:
+                    # A real engineering session runs for many minutes, and
+                    # every tick it spans changes nothing. Without this the
+                    # terminal is silent for the entire session, which is
+                    # indistinguishable from a hang — the same complaint
+                    # ADR 0021 fixed for ticks that *do* move something.
+                    self._logger.info(
+                        "Tick %d: %d session(s) still running.",
+                        ticks,
+                        len(report.sessions_running),
+                    )
                 for notice in report.attention:
                     self._logger.warning("Attention: %s", notice)
+                reason = condition.should_stop(self._store)
+                if reason is not None:
+                    self._logger.info("Stopping after %d tick(s): %s", ticks, reason)
+                    break
                 if max_ticks is None or ticks < max_ticks:
                     sleep(interval_seconds)
         except KeyboardInterrupt:
+            interrupted_by_user = True
             self._logger.info("Execution engine stopped after %d tick(s).", ticks)
+        return RunReport(
+            ticks=ticks, stopped_because=reason, interrupted_by_user=interrupted_by_user
+        )
 
     # -- tick phases -------------------------------------------------------
 
     def _reconcile_active_sessions(
         self, now: datetime
-    ) -> tuple[list[UUID], list[UUID], list[UUID], list[str]]:
+    ) -> tuple[list[UUID], list[UUID], list[UUID], list[str], list[UUID]]:
         """Align every ACTIVE session with what its provider reports."""
         completed: list[UUID] = []
         failed: list[UUID] = []
         interrupted: list[UUID] = []
         attention: list[str] = []
+        running: list[UUID] = []
         for session in self._store.list_sessions(statuses=(SessionStatus.ACTIVE,)):
             if session.external_ref is None or not self._providers.has(session.provider_id):
                 self._logger.warning(
@@ -227,7 +294,9 @@ class ExecutionEngine:
                 self._dispatcher.interrupt_session(session.session_id, resume_at=None)
                 interrupted.append(session.session_id)
                 attention.append(self._report_awaiting_input(session, status.detail))
-        return completed, failed, interrupted, attention
+            elif status.state is ProviderSessionState.RUNNING:
+                running.append(session.session_id)
+        return completed, failed, interrupted, attention, running
 
     def _resume_due_sessions(self, now: datetime) -> tuple[list[UUID], list[UUID]]:
         """Resume INTERRUPTED sessions whose `resume_at` has passed."""

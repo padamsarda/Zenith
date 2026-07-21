@@ -87,6 +87,13 @@ facade methods:
 - `approve_task` — `DRAFT -> READY`: "yes, do this."
 - `accept_task` — `NEEDS_REVIEW -> DONE`: "yes, the work is good."
 
+Both gates have a bulk form over a whole plan, which is the unit a human
+actually decided on: `approve_plan` approves a decomposition and its
+`DRAFT` tasks, `accept_plan` accepts every task of it currently in
+`NEEDS_REVIEW` and completes the plan if that settles it. Neither
+weakens the gate — a human still decides; only the unit of decision
+changes.
+
 `IN_PROGRESS -> DONE` does not exist; nothing completes without review.
 `DONE` and `CANCELLED` are the only terminal statuses — failure is
 always recoverable (`retry_task`, `rework_task`).
@@ -105,10 +112,17 @@ than restartable — interruption is expected (session limits), so it is
 modeled, not treated as failure. `resume_at` records when the execution
 engine may resume an interrupted session automatically; `None` means a
 human must (`AWAITING_INPUT` interruptions are never auto-resumed).
+`starting_revision` and `ending_revision` are the repository revisions
+the session began from and ended at — opaque strings in whatever form
+the probe that recorded them uses, and the evidence of what the session
+actually changed rather than what its `summary` claims. Either may stay
+`None` (no probe configured, or the repository could not be read).
+
 Sessions are mutated only through validated methods: `transition_to`,
 `update_external_ref` (a resume may issue a fresh reference),
-`set_resume_at`, and `close` (stamps `ended_at`/`summary` once
-terminal).
+`set_resume_at`, `stamp_starting_revision` (once only — a resumed
+session keeps the baseline its diff is measured against), and `close`
+(stamps `ended_at`/`summary`/`ending_revision` once terminal).
 
 ## Provider abstraction (ADR 0005)
 
@@ -158,6 +172,20 @@ rather than re-derived — reporting `LIMIT_REACHED` with the parsed
 `resume_at`. `resume_session` starts a fresh `claude --continue`
 subprocess in the same directory, exactly the recovery the watchdog
 performs by hand.
+
+**Permission mode (ADR 0022).** A `--print` session has no stdin and so
+can never answer a permission prompt. In Claude Code's default mode
+every edit and command is therefore denied — and the process still exits
+0 reporting `is_error: false`, which this adapter used to translate into
+`FINISHED`. It now reads the `permission_denials` the CLI reports about
+its own run and fails the session instead, naming the blocked tools and
+the remedy, so a no-op can never be laundered into a completed task.
+`ClaudeCodeProvider(permission_mode=...)` (and `--permission-mode` on
+`run`/`workflow`) grants the authority; `SessionSpec.metadata
+["permission_mode"]` overrides it per session. `acceptEdits` covers file
+edits only, so anything that runs a test suite needs
+`bypassPermissions` — see [`docs/workflow.md`](workflow.md) for why that
+is a real decision and how to contain it.
 
 Credentials resolve from the account ID via an environment-variable
 convention (`ZENITH_CLAUDE_<ACCOUNT>_API_KEY`, normalized upper-case);
@@ -275,6 +303,29 @@ synchronously, with a timeout; a nonzero exit or a timeout fails
 verification, with captured output as the detail. Configure it with
 `manager.set_verification_policy(...)`.
 
+`RevisionProbe` (`orchestration/revisions.py`, ADR 0023) is the seam for
+"what did this session actually change?", and unlike the verification
+seam it is consulted by the dispatcher, at both ends of a session's
+life: `dispatch` stamps `starting_revision` before the session row is
+stored, and every closing method — `complete_session`, `fail_session`,
+`abandon_session` — stamps `ending_revision` on the way out, because
+what a failed session left behind is as much a fact as what a successful
+one did. `NoRevisionProbe` is the default and records nothing, so
+behavior is unchanged unless a probe is configured
+(`EngineeringManager(..., revision_probe=...)`,
+`manager.set_revision_probe(...)`, or `--track-changes` on `run`,
+`workflow`, and `project report`). `GitRevisionProbe` reads `git
+rev-parse HEAD` to stamp a revision and `git diff --numstat` to measure
+between two.
+
+A probe never raises: it runs on paths that have already succeeded, so
+trouble is reported as `None` — an absent measurement, deliberately
+distinct from a measured `RevisionDiff(0, 0, 0)`, and rendered
+differently. What it measures is committed history, so a session that
+edits without committing reads as a zero diff. Stamping happens at
+dispatch, which means a probe configured later cannot measure runs that
+already happened.
+
 ### The execution engine (ADR 0008)
 
 `ExecutionEngine` (`orchestration/engine.py`) is what turns all of the
@@ -317,10 +368,35 @@ deterministic `tick()` advances the whole system in a fixed order:
 
 `tick()` returns a frozen `TickReport` of everything that moved.
 `run()` is only `tick()` on an interval with an injectable `sleep` —
-every decision lives in the tick (ADR 0007). The engine holds no state
-between ticks; parallelism is the dependency graph's width bounded by
-free accounts, and "which provider does what" remains entirely the
-`AssignmentPolicy`'s answer.
+every orchestration decision lives in the tick (ADR 0007). The engine
+holds no state between ticks; parallelism is the dependency graph's
+width bounded by free accounts, and "which provider does what" remains
+entirely the `AssignmentPolicy`'s answer.
+
+### Stopping a run (ADR 0021)
+
+`run()` makes exactly one decision of its own — whether to loop again —
+and delegates it to a `StopCondition` (`orchestration/stop.py`), a seam
+shaped like the other policies: `should_stop(store) -> str | None`,
+returning a human-readable reason or None. It reads durable state only,
+never the `TickReport`, so whether work remains is a property of the
+store rather than of what one tick happened to change.
+
+- `RunForever` — the default; `run()` behaves exactly as it always has.
+- `WhenQuiescent(project_id=None)` — stop once nothing can advance
+  without a human.
+- `WhenPlanSettled(plan_id)` — the same, scoped to one plan.
+
+`run()` returns a `RunReport` (`ticks`, `stopped_because`,
+`interrupted_by_user`) so a caller can tell a finished run from an
+exhausted one from an interrupted one.
+
+"Can advance" means `IN_PROGRESS`, or `READY` **and dispatchable** —
+and dispatchability is transitive. A `READY` task whose dependency sits
+in `NEEDS_REVIEW` is waiting on a human, not on the engine, and so is
+anything behind *it*. Getting this wrong makes an unattended loop tick
+forever against work that can never start, which is the failure the
+seam exists to prevent.
 
 ### Context between sessions (ADR 0010)
 
@@ -336,21 +412,30 @@ construction.
 ## Engineering reports
 
 `manager.project_report(project_id)` renders a Markdown status report —
-plans, a task-status breakdown, work in `NEEDS_REVIEW` with its
-completing session's summary, blocked tasks (`orchestration/graph.py`'s
-`blockages`), recent `AttentionRequired` entries for the project's own
-tasks, and a session-outcome summary — composed by `build_report`
+plans, a task-status breakdown, **completed work** (each `DONE` task
+with what its session reported, and how many attempts it took if more
+than one), work in `NEEDS_REVIEW` with its completing session's summary,
+**failed work** (each `FAILED` task with the reason its most recent
+attempt recorded, and how many times it has failed — the difference
+between a report that says a run stopped and one that says why),
+blocked tasks (`orchestration/graph.py`'s `blockages`), recent
+`AttentionRequired` entries for the project's own tasks, and a
+session-outcome summary — composed by `build_report`
 (`orchestration/report.py`) deterministically from durable state alone,
 the same principle `ContextAssembler` applies to session briefs. This is
 the "what happened while I was away" a human needs after leaving the
 engine running unattended; nothing here is stored, so the report is
-always current. CLI: `project report <project_id> [--out PATH]`.
+always current.
+
+CLI: `project report <project_id> [--out PATH]` renders it on demand;
+`workflow` writes one automatically at the end of every run, timestamped,
+so the record of an unattended run outlives the terminal it ran in.
 
 ## Events
 
 Defined in `engineering_manager/events.py`, emitted with
 `source="engineering_manager"`, persisted to the event log, and emitted
-on the bus: `ProjectAdded`, `ProjectStatusChanged`, `PlanAdded`,
+on the bus: `ProjectAdded`, `ProjectStatusChanged`, `ProjectRelocated`, `PlanAdded`,
 `PlanDecomposed`, `PlanStatusChanged`, `TaskAdded`, `TaskDependencyAdded`,
 `TaskStatusChanged`, `SessionStarted`, `SessionStatusChanged`,
 `AttentionRequired`, `AccountAdded`, `AccountRemoved`. Status-change
@@ -363,31 +448,63 @@ a successful `plan_from_goal` (ADR 0020).
 
 ## CLI
 
+The whole lifecycle in one command — see
+[`docs/workflow.md`](workflow.md), which is the document to read first:
+
+```bash
+python -m engineering_manager workflow zenith "Add a --json flag to status" \
+    --account personal --verify-command "python -m pytest"
+python -m engineering_manager workflow zenith --resume <plan-id> --account personal
+```
+
+`workflow` composes the facade calls below in the order the lifecycle
+implies, pausing at both human gates (`--yes` and `--accept`
+pre-authorize them), running the engine until the plan settles rather
+than for a fixed number of ticks, and writing a timestamped report to
+`--artifacts` (default: beside the database). Because gate two is what
+makes a task `DONE`, and dependents are not eligible until it is, the
+command alternates execution with acceptance rather than accepting only
+at the end — otherwise any plan deeper than one wave would stall (ADR
+0021). `--provider in-memory` simulates the engineering sessions so the
+full lifecycle can be run with no external process.
+
+The individual commands:
+
 ```bash
 python -m engineering_manager [--db PATH] <command>
 
 python -m engineering_manager init
 python -m engineering_manager project add zenith "Zenith" --path .
+python -m engineering_manager project relocate zenith --path ../zenith-work
 python -m engineering_manager plan add zenith "Ship plugin support"
 python -m engineering_manager plan from-goal zenith "Ship plugin support" --account personal
 python -m engineering_manager task add zenith "Implement the loader" --plan <plan-id> --priority 5
 python -m engineering_manager task depend <task-id> <depends-on-id>
-python -m engineering_manager plan approve <plan-id>
+python -m engineering_manager plan approve <plan-id>     # gate one, in bulk
+python -m engineering_manager plan accept <plan-id>      # gate two, in bulk
 python -m engineering_manager plan show <plan-id>       # execution waves
+python -m engineering_manager plan show <plan-id> --detail   # ...with task descriptions
 python -m engineering_manager task approve <task-id>    # standalone tasks
+python -m engineering_manager task show <task-id>       # one task, in full
 python -m engineering_manager task list --status READY
 python -m engineering_manager account add claude-code personal
 python -m engineering_manager status
 python -m engineering_manager project report zenith --out report.md
 python -m engineering_manager log
-python -m engineering_manager run --interval 30 --max-ticks 10 --verify-command "python -m pytest"
+python -m engineering_manager run --interval 30 --until quiescent --verify-command "python -m pytest"
 ```
 
 The database defaults to `~/.zenith/engineering_manager.db`. `run`
 registers `ClaudeCodeProvider` (`--claude-command` overrides the
 executable, default `claude`) and calls `manager.run()`; accounts must
 already exist (`account add claude-code <id>`) for anything to actually
-dispatch. `--verify-command` configures a `CommandVerificationPolicy`
+dispatch — `workflow` registers the account itself, `run` does not.
+`--until quiescent` stops the loop once nothing can advance without a
+human (optionally scoped with `--project`); the default, `forever`,
+ticks until interrupted, which is what a long-lived operator process
+wants. Both `run` and `workflow` take `--provider in-memory` to rehearse
+against simulated sessions, and both configure logging, so the
+tick-by-tick narration reaches the terminal. `--verify-command` configures a `CommandVerificationPolicy`
 (ADR 0019) so a claimed completion is checked before `NEEDS_REVIEW`,
 rather than trusted outright — the recommended setting for anything left
 running unattended. `plan from-goal` registers `ClaudeCodeProvider` the

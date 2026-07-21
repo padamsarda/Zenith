@@ -9,6 +9,8 @@ no I/O: sessions are records in a dict, and tests script what
 
 from __future__ import annotations
 
+import json
+
 from engineering_manager.exceptions import ProviderSessionError
 from engineering_manager.providers.base import (
     Provider,
@@ -20,6 +22,10 @@ from engineering_manager.providers.base import (
 
 DEFAULT_PROVIDER_ID = "in-memory"
 
+# Mirrors what `PlanningSessionRunner` puts on a planning session's spec.
+PLANNING_PURPOSE = "planning"
+PLANNING_TITLE_PREFIX = "Plan: "
+
 
 class InMemoryProvider(Provider):
     """A Provider whose sessions exist only in memory.
@@ -28,12 +34,26 @@ class InMemoryProvider(Provider):
     fresh `external_ref` on purpose: real providers may do the same, so
     orchestration code exercised against this implementation is forced
     to handle a handle that changes across a resume.
+
+    `finish_after_checks` makes sessions complete on their own after
+    that many `check_session` calls. Tests do not need it — they script
+    outcomes precisely — but it lets the full workflow (`workflow
+    --provider in-memory`) be driven end to end with no external
+    process, credentials, or network, so the documented lifecycle is
+    something a new contributor can actually run.
     """
 
-    def __init__(self, provider_id: str = DEFAULT_PROVIDER_ID) -> None:
+    def __init__(
+        self,
+        provider_id: str = DEFAULT_PROVIDER_ID,
+        *,
+        finish_after_checks: int | None = None,
+    ) -> None:
         self._provider_id = provider_id
         self._statuses: dict[str, ProviderSessionStatus] = {}
         self._specs: dict[str, SessionSpec] = {}
+        self._checks: dict[str, int] = {}
+        self._finish_after_checks = finish_after_checks
         self._counter = 0
 
     @property
@@ -64,10 +84,27 @@ class InMemoryProvider(Provider):
     def check_session(self, handle: SessionHandle) -> ProviderSessionStatus:
         """Return the scripted status of the session behind `handle`.
 
+        With `finish_after_checks` set, a session nobody has scripted
+        finishes on its own once it has been checked that many times.
+        A scripted status always wins, so tests that drive this provider
+        explicitly are unaffected.
+
         Raises:
             ProviderSessionError: If `handle` is unknown to this provider.
         """
-        return self._statuses.get(handle.external_ref) or self._unknown(handle)
+        status = self._statuses.get(handle.external_ref) or self._unknown(handle)
+        if self._finish_after_checks is None or status.state is not ProviderSessionState.RUNNING:
+            return status
+        checks = self._checks.get(handle.external_ref, 0) + 1
+        self._checks[handle.external_ref] = checks
+        if checks < self._finish_after_checks:
+            return status
+        finished = ProviderSessionStatus(
+            state=ProviderSessionState.FINISHED,
+            detail=_simulated_detail(self._specs[handle.external_ref], checks),
+        )
+        self._statuses[handle.external_ref] = finished
+        return finished
 
     def resume_session(self, handle: SessionHandle) -> SessionHandle:
         """Resume a session under a deliberately fresh external_ref.
@@ -81,6 +118,7 @@ class InMemoryProvider(Provider):
         new_ref = f"{handle.external_ref}/resumed-{self._counter}"
         self._specs[new_ref] = self._specs.pop(handle.external_ref)
         del self._statuses[handle.external_ref]
+        self._checks.pop(handle.external_ref, None)
         self._statuses[new_ref] = ProviderSessionStatus(state=ProviderSessionState.RUNNING)
         return SessionHandle(provider_id=self._provider_id, external_ref=new_ref)
 
@@ -111,3 +149,40 @@ class InMemoryProvider(Provider):
         raise ProviderSessionError(
             f"Provider '{self._provider_id}' has no session {handle.external_ref!r}."
         )
+
+
+def _simulated_detail(spec: SessionSpec, checks: int) -> str:
+    """Compose the output a self-finishing session reports.
+
+    A planning session (`metadata["purpose"] == "planning"`, set by
+    `PlanningSessionRunner`) must answer in the JSON decomposition
+    format `parse_decomposition` reads, or the simulated workflow would
+    stop at its first step. The three-task chain below is deliberately
+    dependent rather than flat, so a simulated run still exercises
+    dependency waves, ordering, and the graph — the parts most worth
+    seeing work.
+    """
+    if spec.metadata.get("purpose") != PLANNING_PURPOSE:
+        return f"Simulated completion of {spec.task.title!r} after {checks} check(s)."
+    goal = spec.task.title.removeprefix(PLANNING_TITLE_PREFIX)
+    return json.dumps(
+        [
+            {
+                "title": f"Investigate: {goal}",
+                "description": "Survey the affected code and record the approach.",
+                "priority": 2,
+            },
+            {
+                "title": f"Implement: {goal}",
+                "description": "Make the change the investigation settled on.",
+                "priority": 1,
+                "depends_on": [0],
+            },
+            {
+                "title": f"Verify: {goal}",
+                "description": "Cover the change with tests and update the docs.",
+                "priority": 0,
+                "depends_on": [1],
+            },
+        ]
+    )

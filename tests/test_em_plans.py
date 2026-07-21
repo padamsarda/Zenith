@@ -164,3 +164,62 @@ def test_note_task_terminal_ignores_draft_plans(harness: Harness) -> None:
 
     assert harness.coordinator.note_task_terminal(done) is None
     assert harness.store.get_plan(plan.plan_id).status is PlanStatus.DRAFT
+
+
+def test_accept_plan_accepts_every_reviewed_task(harness: Harness) -> None:
+    plan = harness.coordinator.add_plan("zenith", "Ship plugins")
+    first = harness.add_task(plan.plan_id, status=TaskStatus.NEEDS_REVIEW)
+    second = harness.add_task(plan.plan_id, status=TaskStatus.NEEDS_REVIEW)
+    harness.coordinator.approve_plan(plan.plan_id)
+
+    harness.coordinator.accept_plan(plan.plan_id)
+
+    assert harness.store.get_task(first.task_id).status is TaskStatus.DONE
+    assert harness.store.get_task(second.task_id).status is TaskStatus.DONE
+
+
+def test_accept_plan_completes_the_plan_once_every_task_is_terminal(
+    harness: Harness,
+) -> None:
+    plan = harness.coordinator.add_plan("zenith", "Ship plugins")
+    harness.add_task(plan.plan_id, status=TaskStatus.NEEDS_REVIEW)
+    harness.coordinator.approve_plan(plan.plan_id)
+
+    harness.coordinator.accept_plan(plan.plan_id)
+
+    assert harness.store.get_plan(plan.plan_id).status is PlanStatus.COMPLETED
+
+
+def test_accept_plan_leaves_unfinished_work_alone(harness: Harness) -> None:
+    plan = harness.coordinator.add_plan("zenith", "Ship plugins")
+    reviewed = harness.add_task(plan.plan_id, status=TaskStatus.NEEDS_REVIEW)
+    running = harness.add_task(plan.plan_id, status=TaskStatus.IN_PROGRESS)
+    harness.coordinator.approve_plan(plan.plan_id)
+
+    harness.coordinator.accept_plan(plan.plan_id)
+
+    assert harness.store.get_task(reviewed.task_id).status is TaskStatus.DONE
+    assert harness.store.get_task(running.task_id).status is TaskStatus.IN_PROGRESS
+    assert harness.store.get_plan(plan.plan_id).status is PlanStatus.IN_PROGRESS
+
+
+def test_accept_plan_with_nothing_to_accept_is_not_an_error(harness: Harness) -> None:
+    plan = harness.coordinator.add_plan("zenith", "Ship plugins")
+    harness.add_task(plan.plan_id, status=TaskStatus.READY)
+    harness.coordinator.approve_plan(plan.plan_id)
+
+    assert harness.coordinator.accept_plan(plan.plan_id).status is PlanStatus.IN_PROGRESS
+
+
+def test_accept_plan_publishes_a_status_change_per_task(harness: Harness) -> None:
+    plan = harness.coordinator.add_plan("zenith", "Ship plugins")
+    harness.add_task(plan.plan_id, status=TaskStatus.NEEDS_REVIEW)
+    harness.coordinator.approve_plan(plan.plan_id)
+    harness.seen.clear()
+
+    harness.coordinator.accept_plan(plan.plan_id)
+
+    assert [event.name for event in harness.seen] == [
+        "TaskStatusChanged",
+        "PlanStatusChanged",
+    ]

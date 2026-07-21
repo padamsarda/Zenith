@@ -92,6 +92,15 @@ MIGRATIONS: tuple[str, ...] = (
 
     ALTER TABLE sessions ADD COLUMN resume_at TEXT;
     """,
+    # Version 3 — revision evidence: the repository revision each
+    # session started from and the one it ended at, so a finished task
+    # can be reported by what changed and not only by what the session
+    # said about itself. Both are nullable — a run with no revision
+    # probe configured records neither.
+    """
+    ALTER TABLE sessions ADD COLUMN starting_revision TEXT;
+    ALTER TABLE sessions ADD COLUMN ending_revision TEXT;
+    """,
 )
 
 SCHEMA_VERSION = len(MIGRATIONS)

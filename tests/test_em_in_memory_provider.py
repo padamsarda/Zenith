@@ -10,6 +10,7 @@ import pytest
 from engineering_manager.domain.project import Project
 from engineering_manager.domain.task import Task
 from engineering_manager.exceptions import ProviderSessionError
+from engineering_manager.orchestration.planning_decomposition import parse_decomposition
 from engineering_manager.providers.base import (
     ProviderSessionState,
     ProviderSessionStatus,
@@ -122,3 +123,85 @@ def test_script_status_on_unknown_handle_raises() -> None:
         provider.script_status(
             unknown, ProviderSessionStatus(state=ProviderSessionState.FINISHED)
         )
+
+
+def test_sessions_do_not_self_finish_by_default(tmp_path: Path) -> None:
+    provider = InMemoryProvider()
+    handle = provider.start_session(make_spec(tmp_path))
+
+    for _ in range(5):
+        assert provider.check_session(handle).state is ProviderSessionState.RUNNING
+
+
+def test_session_finishes_after_the_configured_number_of_checks(
+    tmp_path: Path,
+) -> None:
+    provider = InMemoryProvider(finish_after_checks=2)
+    handle = provider.start_session(make_spec(tmp_path))
+
+    assert provider.check_session(handle).state is ProviderSessionState.RUNNING
+    assert provider.check_session(handle).state is ProviderSessionState.FINISHED
+
+
+def test_self_finished_session_stays_finished(tmp_path: Path) -> None:
+    provider = InMemoryProvider(finish_after_checks=1)
+    handle = provider.start_session(make_spec(tmp_path))
+
+    provider.check_session(handle)
+
+    assert provider.check_session(handle).state is ProviderSessionState.FINISHED
+
+
+def test_self_finishing_reports_the_task_it_worked_on(tmp_path: Path) -> None:
+    provider = InMemoryProvider(finish_after_checks=1)
+    handle = provider.start_session(make_spec(tmp_path))
+
+    detail = provider.check_session(handle).detail
+
+    assert detail is not None
+    assert "Write docs" in detail
+
+
+def test_a_scripted_status_overrides_self_finishing(tmp_path: Path) -> None:
+    provider = InMemoryProvider(finish_after_checks=1)
+    handle = provider.start_session(make_spec(tmp_path))
+    provider.script_status(
+        handle, ProviderSessionStatus(state=ProviderSessionState.FAILED, detail="Nope.")
+    )
+
+    assert provider.check_session(handle).state is ProviderSessionState.FAILED
+
+
+def test_planning_session_self_finishes_with_a_parsable_decomposition(
+    tmp_path: Path,
+) -> None:
+    """The simulated workflow depends on planning output the parser accepts."""
+    provider = InMemoryProvider(finish_after_checks=1)
+    project = Project(project_id="zenith", name="Zenith", root_path=tmp_path)
+    spec = SessionSpec(
+        session_id=uuid4(),
+        project=project,
+        task=Task(project_id="zenith", title="Plan: Ship it"),
+        account_id="personal",
+        metadata={"purpose": "planning"},
+    )
+    handle = provider.start_session(spec)
+
+    detail = provider.check_session(handle).detail
+
+    assert detail is not None
+    drafts = parse_decomposition(detail)
+    assert len(drafts) == 3
+    assert all("Ship it" in draft.title for draft in drafts)
+    assert drafts[-1].depends_on == (1,)
+
+
+def test_resumed_session_starts_its_check_count_over(tmp_path: Path) -> None:
+    provider = InMemoryProvider(finish_after_checks=2)
+    handle = provider.start_session(make_spec(tmp_path))
+    provider.check_session(handle)
+
+    resumed = provider.resume_session(handle)
+
+    assert provider.check_session(resumed).state is ProviderSessionState.RUNNING
+    assert provider.check_session(resumed).state is ProviderSessionState.FINISHED

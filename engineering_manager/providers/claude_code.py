@@ -43,6 +43,14 @@ DEFAULT_PROVIDER_ID = "claude-code"
 DEFAULT_RESUME_PROMPT = "Continue the previous task."
 TERMINATE_TIMEOUT_SECONDS = 5.0
 
+# Claude Code's own permission modes. `default` prompts for approval,
+# which a `--print` session with no stdin can never receive — every tool
+# call is denied and the session accomplishes nothing. Granting
+# authority is therefore a deliberate argument, not a default: ADR 0022
+# explains why the safe default stays safe and merely became honest.
+PERMISSION_MODES = ("default", "acceptEdits", "bypassPermissions", "plan")
+DEFAULT_PERMISSION_MODE = "default"
+
 
 @dataclass
 class _RunningSession:
@@ -62,6 +70,7 @@ class _RunningSession:
     account_id: str
     model: str | None
     resume_prompt: str
+    permission_mode: str
 
 
 class ClaudeCodeProvider(Provider):
@@ -74,12 +83,14 @@ class ClaudeCodeProvider(Provider):
         provider_id: str = DEFAULT_PROVIDER_ID,
         launcher: Launcher = default_launcher,
         resume_prompt: str = DEFAULT_RESUME_PROMPT,
+        permission_mode: str = DEFAULT_PERMISSION_MODE,
         logger: logging.Logger | None = None,
     ) -> None:
         self._command = command
         self._provider_id = provider_id
         self._launcher = launcher
         self._resume_prompt = resume_prompt
+        self._permission_mode = permission_mode
         self._logger = logger or logging.getLogger(DEFAULT_LOGGER_NAME)
         self._sessions: dict[str, _RunningSession] = {}
 
@@ -117,7 +128,11 @@ class ClaudeCodeProvider(Provider):
                 f"Project '{spec.project.project_id}' path does not exist: {root_path}"
             )
 
+        permission_mode = str(
+            spec.metadata.get("permission_mode", self._permission_mode)
+        )
         args = [*self._command, "--print", instructions, "--output-format", "json"]
+        args.extend(["--permission-mode", permission_mode])
         if spec.model:
             args.extend(["--model", spec.model])
         args.extend(str(arg) for arg in spec.metadata.get("args", []))
@@ -131,6 +146,7 @@ class ClaudeCodeProvider(Provider):
             account_id=spec.account_id,
             model=spec.model,
             resume_prompt=str(spec.metadata.get("resume_prompt", self._resume_prompt)),
+            permission_mode=permission_mode,
         )
         self._logger.info("Started Claude Code session %s in %s.", external_ref, root_path)
         return SessionHandle(provider_id=self._provider_id, external_ref=external_ref)
@@ -167,6 +183,8 @@ class ClaudeCodeProvider(Provider):
             running.resume_prompt,
             "--output-format",
             "json",
+            "--permission-mode",
+            running.permission_mode,
         ]
         if running.model:
             args.extend(["--model", running.model])
@@ -181,6 +199,7 @@ class ClaudeCodeProvider(Provider):
             account_id=running.account_id,
             model=running.model,
             resume_prompt=running.resume_prompt,
+            permission_mode=running.permission_mode,
         )
         self._logger.info("Resumed Claude Code session %s as %s.", handle.external_ref, new_ref)
         return SessionHandle(provider_id=self._provider_id, external_ref=new_ref)

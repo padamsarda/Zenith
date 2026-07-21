@@ -95,6 +95,37 @@ class PlanCoordinator:
         )
         return plan
 
+    def accept_plan(self, plan_id: UUID) -> Plan:
+        """Accept every reviewed task in a plan: gate two, in bulk.
+
+        The mirror of `approve_plan`. Gate one always had a bulk form —
+        a human approves a decomposition as a whole — but gate two did
+        not, so closing a plan meant accepting each task individually by
+        UUID and a plan could realistically never reach COMPLETED. This
+        does not weaken the gate: a human still decides, and only tasks
+        actually in NEEDS_REVIEW move. Tasks still executing, failed, or
+        awaiting approval are left exactly where they are.
+
+        Accepting nothing is not an error — a plan whose work is already
+        accepted is simply settled, and the caller can tell from the
+        returned plan's status.
+
+        Raises:
+            PlanNotFoundError: If `plan_id` is not in the store.
+            DomainValidationError: If a task cannot leave NEEDS_REVIEW.
+        """
+        plan = self._store.get_plan(plan_id)
+        reviewed = [
+            task
+            for task in self._store.list_tasks(plan_id=plan_id)
+            if task.status is TaskStatus.NEEDS_REVIEW
+        ]
+        for task in reviewed:
+            self._transition_task(task, TaskStatus.DONE)
+        self._logger.info("Plan %s accepted %d reviewed task(s).", plan_id, len(reviewed))
+        self._complete_if_settled(plan)
+        return plan
+
     def cancel_plan(self, plan_id: UUID) -> Plan:
         """Cancel a plan and every one of its non-terminal tasks.
 
@@ -119,10 +150,17 @@ class PlanCoordinator:
         """
         if task.plan_id is None:
             return None
-        plan = self._store.get_plan(task.plan_id)
+        return self._complete_if_settled(self._store.get_plan(task.plan_id))
+
+    def _complete_if_settled(self, plan: Plan) -> Plan | None:
+        """Complete `plan` if it is running and every one of its tasks is terminal.
+
+        Returns the completed plan, or None when there was nothing to
+        complete.
+        """
         if plan.status is not PlanStatus.IN_PROGRESS:
             return None
-        tasks = self._store.list_tasks(plan_id=task.plan_id)
+        tasks = self._store.list_tasks(plan_id=plan.plan_id)
         if not all(member.status in TERMINAL_TASK_STATUSES for member in tasks):
             return None
         self._transition_plan(plan, PlanStatus.COMPLETED)

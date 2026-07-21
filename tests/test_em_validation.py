@@ -30,6 +30,7 @@ from engineering_manager.domain.validation import (
     validate_project,
     validate_project_status_transition,
     validate_resume_at,
+    validate_revision,
     validate_session,
     validate_session_status_transition,
     validate_task,
@@ -233,6 +234,23 @@ def test_validate_resume_at_accepts_datetime_and_none() -> None:
 def test_validate_resume_at_rejects_other_types() -> None:
     with pytest.raises(DomainValidationError):
         validate_resume_at("2026-07-20T00:00:00")
+
+
+def test_validate_revision_accepts_any_string() -> None:
+    validate_revision("abc123", kind="starting revision")
+    validate_revision("", kind="starting revision")
+
+
+def test_validate_revision_rejects_non_strings() -> None:
+    with pytest.raises(DomainValidationError):
+        validate_revision(None, kind="ending revision")
+    with pytest.raises(DomainValidationError):
+        validate_revision(42, kind="ending revision")
+
+
+def test_validate_revision_names_the_field_in_the_message() -> None:
+    with pytest.raises(DomainValidationError, match="ending revision"):
+        validate_revision(42, kind="ending revision")
 
 
 def test_validate_project_accepts_well_formed_project(tmp_path: Path) -> None:

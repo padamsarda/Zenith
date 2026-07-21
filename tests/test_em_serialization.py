@@ -132,6 +132,26 @@ def test_session_round_trip_with_open_fields() -> None:
     assert restored.ended_at is None
     assert restored.external_ref is None
     assert restored.resume_at is None
+    assert restored.starting_revision is None
+    assert restored.ending_revision is None
+
+
+def test_session_revisions_round_trip() -> None:
+    session = Session(
+        task_id=uuid4(),
+        project_id="zenith",
+        provider_id="claude",
+        account_id="personal",
+        status=SessionStatus.COMPLETED,
+    )
+    session.stamp_starting_revision("abc123")
+    session.close(summary="Done", ending_revision="def456")
+
+    restored = session_from_row(as_row(session_to_row(session)))
+
+    assert restored == session
+    assert restored.starting_revision == "abc123"
+    assert restored.ending_revision == "def456"
 
 
 def test_session_resume_at_round_trips() -> None:

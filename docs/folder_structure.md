@@ -89,8 +89,14 @@ runtime/                       The Zenith assistant runtime.
 engineering_manager/           The Engineering Manager application.
     __init__.py                 Package docstring only.
     __main__.py                 `python -m engineering_manager` entry point.
-    cli.py                      Command-line interface over the facade.
-    cli_commands.py             Command handlers the CLI dispatches to.
+    cli.py                      Entry point: parse, dispatch, exit code.
+    cli_parser.py               The command-line grammar.
+    cli_commands.py             Handlers for the bookkeeping commands.
+    cli_engine.py               The commands that run the engine (`run`,
+                                  `workflow`) and their setup.
+    cli_workflow.py             The `workflow` lifecycle: one goal, end to
+                                  end (ADR 0021).
+    cli_workflow_output.py      Presenting a workflow run to the terminal.
     manager.py                  EngineeringManager facade.
     events.py                   Concrete Engineering Manager events.
     exceptions.py               EM exception hierarchy (rooted at ZenithError).
@@ -122,6 +128,12 @@ engineering_manager/           The Engineering Manager application.
                                    ExponentialBackoffRetryPolicy.
         verification.py          VerificationPolicy ABC, NoVerificationPolicy,
                                    CommandVerificationPolicy (ADR 0019).
+        stop.py                  StopCondition ABC, RunForever, WhenQuiescent,
+                                   WhenPlanSettled: when a run loop is done
+                                   (ADR 0021).
+        revisions.py             RevisionProbe ABC, NoRevisionProbe,
+                                   GitRevisionProbe: what a session changed
+                                   in the repository (ADR 0023).
         graph.py                 Dependency-graph analysis: cycles, waves, blockages.
         context.py               ContextAssembler: composes session briefs.
         plans.py                 PlanCoordinator: plan lifecycle operations.
@@ -131,9 +143,11 @@ engineering_manager/           The Engineering Manager application.
                                   TaskDraft, parse_decomposition,
                                    build_planning_instructions.
         report.py                ProjectReport, build_report, render_markdown:
-                                   Markdown engineering reports from durable state.
+                                   Markdown engineering reports from durable state,
+                                   with per-task revision deltas (ADR 0023).
         dispatcher.py            Dispatcher: eligibility, dispatch, session lifecycle.
-        engine.py                ExecutionEngine: the reconcile-and-advance tick.
+        engine.py                ExecutionEngine: the reconcile-and-advance tick,
+                                   TickReport, RunReport.
 
 configs/                       Configuration loading for the Zenith runtime.
     config.py                   Config dataclass and TOML loader.

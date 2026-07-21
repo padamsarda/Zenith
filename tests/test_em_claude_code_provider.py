@@ -356,3 +356,57 @@ def test_real_subprocess_end_to_end_reports_finished(tmp_path: Path) -> None:
 
     assert status.state is ProviderSessionState.FINISHED
     assert status.detail == "All done."
+
+
+def test_start_session_passes_the_default_permission_mode(tmp_path: Path) -> None:
+    launcher = FakeLauncher()
+    launcher.queue(FakeProcess([]))
+    provider = ClaudeCodeProvider(launcher=launcher)
+
+    provider.start_session(make_spec(tmp_path))
+
+    args, _env, _cwd = launcher.calls[0]
+    assert args[args.index("--permission-mode") + 1] == "default"
+
+
+def test_start_session_passes_a_configured_permission_mode(tmp_path: Path) -> None:
+    launcher = FakeLauncher()
+    launcher.queue(FakeProcess([]))
+    provider = ClaudeCodeProvider(launcher=launcher, permission_mode="acceptEdits")
+
+    provider.start_session(make_spec(tmp_path))
+
+    args, _env, _cwd = launcher.calls[0]
+    assert args[args.index("--permission-mode") + 1] == "acceptEdits"
+
+
+def test_session_metadata_overrides_the_provider_permission_mode(tmp_path: Path) -> None:
+    launcher = FakeLauncher()
+    launcher.queue(FakeProcess([]))
+    provider = ClaudeCodeProvider(launcher=launcher, permission_mode="default")
+
+    provider.start_session(
+        make_spec(tmp_path, metadata={"permission_mode": "acceptEdits"})
+    )
+
+    args, _env, _cwd = launcher.calls[0]
+    assert args[args.index("--permission-mode") + 1] == "acceptEdits"
+
+
+def test_resume_session_keeps_the_original_permission_mode(tmp_path: Path) -> None:
+    """A resumed session needs the same authority the first one had.
+
+    Losing it on resume would make a limit-interrupted task quietly
+    switch to a mode that cannot act — the ADR 0022 failure, reappearing
+    only for long-running work.
+    """
+    launcher = FakeLauncher()
+    launcher.queue(FakeProcess([]))
+    launcher.queue(FakeProcess([]))
+    provider = ClaudeCodeProvider(launcher=launcher, permission_mode="acceptEdits")
+    handle = provider.start_session(make_spec(tmp_path))
+
+    provider.resume_session(handle)
+
+    args, _env, _cwd = launcher.calls[1]
+    assert args[args.index("--permission-mode") + 1] == "acceptEdits"

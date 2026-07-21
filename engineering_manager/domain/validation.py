@@ -196,6 +196,19 @@ def validate_resume_at(resume_at: object) -> None:
         )
 
 
+def validate_revision(revision: object, *, kind: str) -> None:
+    """Raise DomainValidationError if `revision` is not a string.
+
+    A revision is opaque to the domain — whatever the probe that
+    recorded it uses — so the only structural check is its type. `kind`
+    names the field in the error message (e.g. "starting revision").
+    """
+    if not isinstance(revision, str):
+        raise DomainValidationError(
+            f"Session {kind} must be a str, got {type(revision).__name__}"
+        )
+
+
 def validate_project(project: Project) -> None:
     """Raise DomainValidationError if `project` fails structural validation."""
     validate_identifier(project.project_id, kind="project id")

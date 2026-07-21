@@ -47,3 +47,6 @@ longer applies or accidentally reversing one that still does.
 - [0018 — SQLite-backed durable conversations](0018-sqlite-backed-durable-conversations.md)
 - [0019 — A verification gate between a provider's FINISHED and NEEDS_REVIEW](0019-verification-gate-before-needs-review.md)
 - [0020 — AI-performed planning through an ordinary Provider session](0020-ai-performed-planning.md)
+- [0021 — The workflow as a first-class lifecycle: stop conditions and gate two in the loop](0021-the-workflow-as-a-first-class-lifecycle.md)
+- [0022 — A session must be able to act, and must fail loudly when it cannot](0022-a-session-must-be-able-to-act.md)
+- [0023 — Recording what a session changed, as an observation that cannot fail](0023-recording-what-a-session-changed.md)
