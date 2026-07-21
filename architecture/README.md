@@ -50,3 +50,4 @@ longer applies or accidentally reversing one that still does.
 - [0021 — The workflow as a first-class lifecycle: stop conditions and gate two in the loop](0021-the-workflow-as-a-first-class-lifecycle.md)
 - [0022 — A session must be able to act, and must fail loudly when it cannot](0022-a-session-must-be-able-to-act.md)
 - [0023 — Recording what a session changed, as an observation that cannot fail](0023-recording-what-a-session-changed.md)
+- [0024 — Desktop control: the first tools that act on the OS, not a sandboxed root](0024-desktop-control-the-first-os-acting-tools.md)

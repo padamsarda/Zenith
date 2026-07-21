@@ -178,6 +178,8 @@ root(s) its deployment allows and registers it explicitly.
 | `GitTool` | `git` | `status`/`diff`/`add`/`commit`/`branch`/`checkout`/`log`/`reset` (mixed mode only) against a repository. No `push`, `pull`, `clone`, or `--hard`. |
 | `DiffTool` | `diff` | A unified diff (`difflib`) between two inline texts or two sandboxed files. |
 | `TestRunnerTool` | `test_runner` | Runs the test suite (`python -m pytest` by default) and reports the exit code, captured output, and best-effort pass/fail counts. |
+| `AppLauncherTool` | `app_launcher` | Opens an application, file, or URL by everyday name (ADR 0024). |
+| `MediaControlTool` | `media_control` | Play/pause, skip, mute, and relative volume, by simulating hardware media keys (ADR 0024). |
 
 `FilesystemTool`, `ShellTool` (`cwd`), `GitTool` (path arguments), and
 `TestRunnerTool` (`path`) all confine their path arguments to a
@@ -188,6 +190,15 @@ checks. `ShellTool`, `GitTool`, and `TestRunnerTool` shell out through
 `CommandContext.cancellation_token` — raising `CommandCancelledError` if
 it is set — the reserved seam `docs/commands.md` describes, now with its
 first real user.
+
+`AppLauncherTool` and `MediaControlTool` (ADR 0024) are not sandboxed to
+a root — there is nothing to sandbox an "open this application" or
+"press this key" call to. Their boundary is the `PermissionPolicy`
+alone, so a `ToolAllowlistPolicy` matters even more for these two than
+for the rest of the suite. Both take an injectable side-effecting
+callable (`Launcher`, `KeySender`) so tests never launch a real process
+or send a real key press; the real Windows-backed defaults are exercised
+in practice, not in the cross-platform CI matrix.
 
 Registering one:
 

@@ -5,6 +5,19 @@ on what exists; none requires reworking current foundations. This file
 is direction, not commitment — reorder freely, but record significant
 design choices as ADRs (`architecture/`) when implementing.
 
+**Product direction (2026-07-21):** the runtime being built here is
+**Zeni**, a personal assistant meant to be used every day — not just an
+engineering tool. The Engineering Manager remains infrastructure Zeni
+can use internally, not the product. Priorities below are now judged
+against "does this make Zeni more useful tomorrow": vertical slices a
+person actually invokes (opening an app, controlling media, eventually
+voice and memory) outrank engineering-only capability unless the two
+overlap. Credential-gated integrations (Spotify's own API, Notion,
+GitHub, WhatsApp, Calendar, email, voice STT/TTS) are deliberately
+deferred to whenever real credentials and product decisions are
+available to wire them — see the "Zenith runtime" section below for
+what is buildable without them right now.
+
 ## Engineering Manager
 
 The execution engine — plans, the evolving task graph, the
@@ -257,7 +270,38 @@ of this item.
 `ConsoleInterface` owns nothing but line I/O; a voice, GUI, or network
 interface is the same shape over `AssistantEngine.handle`. Streaming
 responses are the one thing that will need design work (ADR 0007) —
-everything else fits behind `handle` as it stands.
+everything else fits behind `handle` as it stands. Voice specifically
+needs an STT/TTS integration, which needs a provider and credentials
+chosen — deferred until that choice is made, not built here.
+
+### 6. Desktop control (highest value for daily use) — shipped
+
+`AppLauncherTool` (`app_launcher`) and `MediaControlTool`
+(`media_control`) (`runtime/tools/`, ADR 0024) are the first tools that
+act on the desktop rather than a sandboxed project: opening an
+application/file/URL by everyday name, and play/pause/skip/mute/volume
+by simulating hardware media keys. Both need zero credentials or manual
+setup beyond registering them — directly answering the product
+direction's own daily-interaction examples ("open Spotify," "pause the
+music," "increase volume," "open VS Code"). Neither is auto-registered,
+following the ADR 0016 precedent exactly.
+
+Still open: closing/switching applications, listing what is running,
+Bluetooth, and display management (all named in the product vision, none
+built — see ADR 0024's consequences), and an absolute volume level
+(needs the Windows Core Audio COM API, which has no stdlib binding).
+
+### 7. A real, runnable Zeni — next
+
+Every piece above is still library code: `Runtime._initialize_assistant`
+registers only `EchoProvider`, and no entry point registers
+`ClaudeProvider`, `ToolAllowlistPolicy`, or the tool suite together for
+actual daily use. The next milestone is a composition root — plausibly
+`main.py` itself, reading credentials from the environment the same way
+`ClaudeProvider` already does — that turns `python main.py` into an
+assistant genuinely worth talking to, not just a pipeline with tools
+available to whoever wires them. This needs no new mechanism, only
+assembling what ADR 0015, 0016, and 0024 already built.
 
 ## Repository-wide
 

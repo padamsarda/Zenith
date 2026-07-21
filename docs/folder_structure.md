@@ -74,6 +74,8 @@ runtime/                       The Zenith assistant runtime.
         git.py                   GitTool.
         diff.py                  DiffTool.
         test_runner.py           TestRunnerTool.
+        app_launcher.py          AppLauncherTool: opens an app/file/URL by name (ADR 0024).
+        media_control.py         MediaControlTool: play/pause/skip/mute/volume (ADR 0024).
     assistant/
         status.py                RequestStatus enum, TERMINAL_STATUSES.
         validation.py            Request and turn guard functions.
