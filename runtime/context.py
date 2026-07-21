@@ -13,6 +13,8 @@ from runtime.capabilities.tool_registry import ToolRegistry
 from runtime.commands.executor import CommandExecutor
 from runtime.conversation.in_memory_store import InMemoryConversationStore
 from runtime.conversation.store import ConversationStore
+from runtime.memory.in_memory_store import InMemoryMemoryStore
+from runtime.memory.store import MemoryStore
 from runtime.plugins.registry import PluginRegistry
 from runtime.providers.registry import AssistantProviderRegistry
 from runtime.registry import ServiceRegistry
@@ -43,6 +45,7 @@ class ApplicationContext:
     commands: CommandExecutor = field(default_factory=CommandExecutor)
     plugins: PluginRegistry = field(default_factory=PluginRegistry)
     conversations: ConversationStore = field(default_factory=InMemoryConversationStore)
+    memory: MemoryStore = field(default_factory=InMemoryMemoryStore)
     tools: ToolRegistry = field(default_factory=ToolRegistry)
     skills: SkillRegistry = field(default_factory=SkillRegistry)
     assistant_providers: AssistantProviderRegistry = field(

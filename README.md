@@ -100,6 +100,24 @@ Opening applications and controlling media/volume by name
 ([ADR 0024](architecture/0024-desktop-control-the-first-os-acting-tools.md))
 runs unconfirmed — neither can lose data.
 
+Zeni also **remembers**
+([ADR 0027](architecture/0027-memory-automatic-recall-recency-importance-relevance.md)):
+substantive things you tell it are stored durably in `~/.zenith/memory.db`
+and recalled automatically into every turn, scored by recency,
+importance, and relevance, with relative time ("yesterday", "last
+month") resolved to real dates. Device commands are deliberately not
+remembered. See [`docs/memory.md`](docs/memory.md).
+
+```
+you> The CubeSat battery is an 18650 lithium pack
+zenith> Noted.
+you> exit
+
+$ python main.py          # a new session, days later
+you> what battery does the cubesat use
+zenith> An 18650 lithium pack.
+```
+
 ## Running the Engineering Manager
 
 One objective, from a sentence to a finished, reviewed, reported change:
@@ -156,6 +174,7 @@ and 3.13 on every push to `master` and every pull request.
 - [`docs/workflow.md`](docs/workflow.md) — the engineering lifecycle end to end: project, plan, execution, verification, reporting.
 - [`docs/architecture.md`](docs/architecture.md) — Zenith runtime internals.
 - [`docs/assistant.md`](docs/assistant.md) — the assistant runtime: conversations, capabilities, providers, and the request pipeline.
+- [`docs/memory.md`](docs/memory.md) — Zeni's long-term memory: what it stores, how it recalls, and what it deliberately does not remember.
 - [`docs/engineering_manager.md`](docs/engineering_manager.md) — Engineering Manager architecture.
 - [`docs/events.md`](docs/events.md) — the shared event system.
 - [`docs/commands.md`](docs/commands.md) — the command execution framework.

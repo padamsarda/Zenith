@@ -164,6 +164,34 @@ class ToolExecutionError(CapabilityError):
     """
 
 
+class MemoryError_(ZenithError):
+    """Base class for all memory subsystem errors.
+
+    Named with a trailing underscore to avoid shadowing the built-in
+    `MemoryError`, following the same rule that gives the runtime
+    `ZenithRuntimeError` rather than `RuntimeError`. Subclasses carry
+    ordinary names, since none of them collides.
+    """
+
+
+class MemoryNotFoundError(MemoryError_):
+    """Raised when looking up or forgetting a memory ID that isn't stored."""
+
+
+class MemoryValidationError(MemoryError_):
+    """Raised when a Memory fails structural validation (content,
+    kind, importance range, tags, or access count).
+    """
+
+
+class MemoryStoreError(MemoryError_):
+    """Raised by a durable `MemoryStore` for a storage-layer failure that
+    is not a `MemoryNotFoundError` or `MemoryValidationError` — a
+    newer-than-supported schema, a SQLite build without FTS5, or a
+    migration or query that failed. Mirrors `ConversationStoreError`.
+    """
+
+
 class AssistantError(ZenithError):
     """Base class for all assistant pipeline errors."""
 

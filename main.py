@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from runtime.assistant.confirmation import ConfirmationHook
+from runtime.assistant.memory_capture import MemoryCaptureHook
 from runtime.assistant.permissions import ToolAllowlistPolicy
+from runtime.memory.sqlite.store import SQLiteMemoryStore
 from runtime.providers.claude import API_KEY_ENV_VAR, ClaudeProvider
 from runtime.runtime import Runtime
 from runtime.tools.app_control import AppControlTool
@@ -24,11 +26,19 @@ from runtime.tools.diff import DiffTool
 from runtime.tools.filesystem import FilesystemTool
 from runtime.tools.git import GitTool
 from runtime.tools.media_control import MediaControlTool
+from runtime.tools.memory_tool import MemoryTool
 from runtime.tools.shell import ShellTool
 from runtime.tools.test_runner import TestRunnerTool
 
 if TYPE_CHECKING:
     from runtime.context import ApplicationContext
+
+# Zeni's durable state lives beside the Engineering Manager's, under one
+# per-user directory rather than in whatever folder it happened to be
+# started from — memory that moved with the working directory would not
+# be memory.
+STATE_DIR = Path.home() / ".zenith"
+MEMORY_DB_PATH = STATE_DIR / "memory.db"
 
 # Every tool_id registered by _wire_zeni, in one place so the allowlist
 # can never drift from what was actually registered.
@@ -41,6 +51,7 @@ TOOL_IDS = (
     "app_launcher",
     "app_control",
     "media_control",
+    "memory",
 )
 
 
@@ -70,6 +81,12 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
 
     context.assistant_providers.register(ClaudeProvider())
 
+    # Durable memory replaces the in-memory default before anything can
+    # write to it. Recall is automatic from here on: the assembler pulls
+    # relevant memories into every brief, and MemoryCaptureHook stores
+    # what is worth keeping (ADR 0027).
+    context.memory = SQLiteMemoryStore(MEMORY_DB_PATH)
+
     context.tools.register(FilesystemTool(workspace), context)
     context.tools.register(ShellTool(workspace), context)
     context.tools.register(GitTool(workspace), context)
@@ -78,12 +95,16 @@ def _wire_zeni(context: ApplicationContext, workspace: Path) -> None:
     context.tools.register(AppLauncherTool(), context)
     context.tools.register(AppControlTool(), context)
     context.tools.register(MediaControlTool(), context)
+    context.tools.register(MemoryTool(), context)
 
     context.assistant.set_permission_policy(ToolAllowlistPolicy(TOOL_IDS))
     context.assistant.add_hook(ConfirmationHook())
+    context.assistant.add_hook(MemoryCaptureHook())
 
     context.logger.info(
-        "Zeni's full capability set is registered (workspace=%s).", workspace
+        "Zeni's full capability set is registered (workspace=%s, memory=%s).",
+        workspace,
+        MEMORY_DB_PATH,
     )
 
 

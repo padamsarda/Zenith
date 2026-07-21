@@ -181,6 +181,7 @@ root(s) its deployment allows and registers it explicitly.
 | `AppLauncherTool` | `app_launcher` | Opens an application, file, or URL by everyday name (ADR 0024). |
 | `AppControlTool` | `app_control` | Lists open windows, switches to one, or closes a running application (ADR 0026). |
 | `MediaControlTool` | `media_control` | Play/pause, skip, mute, and relative volume, by simulating hardware media keys (ADR 0024). |
+| `MemoryTool` | `memory` | Deliberately remember a fact, search further back than the brief, or forget something wrong (ADR 0027). |
 
 `FilesystemTool`, `ShellTool` (`cwd`), `GitTool` (path arguments), and
 `TestRunnerTool` (`path`) all confine their path arguments to a
@@ -396,11 +397,18 @@ request.
 ### Context assembly
 
 `AssistantContextAssembler` composes each `TurnBrief` from durable
-state: the conversation's messages, the active skills' instructions,
-and a freshly built `CapabilityCatalog`. Nothing is cached or stored,
-so a brief can never go stale, and it survives restarts by construction
-once conversations are durable. This is ADR 0010's principle applied to
-the assistant.
+state: the conversation's messages, the active skills' instructions, a
+freshly built `CapabilityCatalog`, and **the memories relevant to what
+was just asked**. Nothing is cached or stored, so a brief can never go
+stale, and it survives restarts by construction once conversations are
+durable. This is ADR 0010's principle applied to the assistant.
+
+Memory is recalled here, on every turn, rather than through a tool the
+model chooses to call — what Zeni already knows should simply be present
+when it answers, not something it must first think to look up. The
+recall itself (`MemoryRecaller`, relative-time resolution, retrieval
+scoring) lives in `runtime/memory/`; see
+[`memory.md`](memory.md) and ADR 0027.
 
 ### Permissions and hooks
 
@@ -466,6 +474,14 @@ stdin; it is injected (`ConfirmationHook(confirmer=...)`) so tests never
 block on real input, and so a future non-console interface can supply
 its own confirmation UI instead of reusing this one.
 
+**`MemoryCaptureHook`** (`runtime/assistant/memory_capture.py`, ADR
+0027) is the other shipped hook: an `after_request` hook that stores
+what the user said when the salience rules judge it worth keeping, and
+stays silent for device commands and pleasantries. Observational by
+design — capture happens after a request has already succeeded, and a
+failure to capture is logged and swallowed. See
+[`memory.md`](memory.md).
+
 ### Events
 
 All emitted with `source="assistant_engine"`:
@@ -524,6 +540,7 @@ Added to `runtime.exceptions`, all rooted at `ZenithError`:
 | Base | Subclasses |
 |---|---|
 | `ConversationError` | `ConversationNotFoundError`, `ConversationValidationError` |
+| `MemoryError_` | `MemoryNotFoundError`, `MemoryValidationError`, `MemoryStoreError` |
 | `CapabilityError` | `CapabilityValidationError`, `ToolRegistrationError`, `ToolNotFoundError`, `SkillRegistrationError`, `SkillNotFoundError`, `ToolExecutionError` |
 | `AssistantError` | `AssistantProviderError`, `AssistantProviderRegistrationError`, `AssistantProviderNotFoundError`, `RequestValidationError` |
 

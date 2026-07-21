@@ -8,8 +8,10 @@ Two applications over one shared foundation (ADR 0002):
 
 - `runtime/` — the **Zenith** assistant runtime (lifecycle, events,
   commands, plugins, and the assistant subsystem: conversations,
-  capabilities, providers, and the request pipeline). Entry point:
-  `python main.py`.
+  memory, capabilities, providers, and the request pipeline). Entry
+  point: `python main.py`, which is also **Zeni's composition root** —
+  the specific deployment that decides what the assistant can actually
+  do on this machine (ADR 0025).
 - `engineering_manager/` — the **Engineering Manager**, a local-first
   orchestrator of AI-performed engineering work (projects, plans,
   tasks, sessions, providers, and the execution engine that drives
@@ -38,8 +40,8 @@ pytest tests/test_em_store.py -q   # one module while iterating
 3. The reference doc for the area you touch: `docs/workflow.md` (the
    engineering lifecycle end to end — read this first for anything in
    `engineering_manager/`), `docs/architecture.md` (runtime),
-   `docs/assistant.md` (the assistant subsystem),
-   `docs/engineering_manager.md` (EM), `docs/events.md`,
+   `docs/assistant.md` (the assistant subsystem), `docs/memory.md`
+   (memory), `docs/engineering_manager.md` (EM), `docs/events.md`,
    `docs/commands.md`, `docs/plugins.md`.
 4. `docs/roadmap.md` — the intended build order; prefer roadmap items
    over invented scope.
@@ -120,6 +122,28 @@ pytest tests/test_em_store.py -q   # one module while iterating
   a failed tick (ADR 0023).
 - **New runtime capability**: execute it as a `Command` through
   `CommandExecutor`; new shared state lives on `ApplicationContext`.
+- **New memory backend**: subclass `runtime.memory.store.MemoryStore`
+  (seven methods), treat `InMemoryMemoryStore` +
+  `tests/test_memory_store.py` as the executable spec — both backends
+  run through the *same* parametrized tests, and any divergence must
+  fail there rather than in production. `search` returns candidates
+  carrying a **normalized relevance in `[0, 1]`**; scoring is the
+  `MemoryRetrievalPolicy`'s job and must stay backend-agnostic, which is
+  what makes an embedding backend a drop-in (ADR 0027).
+- **New memory retrieval rule**: subclass
+  `runtime.memory.retrieval.MemoryRetrievalPolicy` (one method, `rank`);
+  the store, recaller, and assembler need no changes. Keep the component
+  scores on `ScoredMemory` populated — a recall that cannot be explained
+  can only be trusted.
+- **Changing what gets remembered**: the rules live in
+  `runtime/memory/salience.py` and are applied by `MemoryCaptureHook`.
+  They are deliberately explicit rather than an LLM judgment: rules cost
+  nothing per turn and are correctable by a human. An explicit
+  "remember this" must always win over every other heuristic.
+- **Anything touching memory must not be able to fail a request.**
+  `MemoryRecaller.recall` and `MemoryCaptureHook` both catch, log, and
+  continue — a broken memory subsystem yields an assistant with no
+  memory, never a failed request (ADR 0023's rule, applied here).
 - **New Zenith plugin**: subclass `runtime.plugins.plugin.Plugin`;
   lifecycle is driven by `PluginRegistry` (`docs/plugins.md`).
 - **New assistant tool**: subclass `runtime.capabilities.tool.Tool`

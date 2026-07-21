@@ -51,6 +51,22 @@ runtime/                       The Zenith assistant runtime.
             database.py           Connection + user_version migrations.
             serialization.py      Domain-object <-> row conversion.
             store.py               SQLiteConversationStore.
+    memory/                      Zeni's long-term memory (ADR 0027).
+        memory.py                Memory, MemoryKind.
+        validation.py            Memory validation guard functions.
+        matching.py              Tokenization and lexical relevance helpers.
+        temporal.py              TimeWindow, TemporalQuery, relative-time resolution.
+        salience.py              What is worth remembering, and how much.
+        retrieval.py             MemoryRetrievalPolicy ABC,
+                                   RecencyImportanceRelevancePolicy, ScoredMemory.
+        recall.py                MemoryRecaller, render_memories, describe_age.
+        events.py                Concrete memory events.
+        store.py                 MemoryStore (ABC).
+        in_memory_store.py       InMemoryMemoryStore (default).
+        sqlite/                  SQLiteMemoryStore, searched with FTS5/BM25.
+            database.py           Connection + user_version migrations + FTS5 index.
+            serialization.py      Memory <-> row conversion.
+            store.py               SQLiteMemoryStore.
     capabilities/
         tool.py                  Tool (ABC), ToolParameter.
         skill.py                 Skill (ABC).
@@ -81,6 +97,7 @@ runtime/                       The Zenith assistant runtime.
         app_launcher.py          AppLauncherTool: opens an app/file/URL by name (ADR 0024).
         app_control.py           AppControlTool: list/switch/close running apps (ADR 0026).
         media_control.py         MediaControlTool: play/pause/skip/mute/volume (ADR 0024).
+        memory_tool.py           MemoryTool: deliberate remember/search/forget (ADR 0027).
     assistant/
         status.py                RequestStatus enum, TERMINAL_STATUSES.
         validation.py            Request and turn guard functions.
@@ -92,6 +109,8 @@ runtime/                       The Zenith assistant runtime.
         hooks.py                 AssistantHook.
         confirmation.py          ConfirmationHook: confirms destructive tool
                                    calls before they run (ADR 0025).
+        memory_capture.py        MemoryCaptureHook: stores what is worth
+                                   remembering after a request (ADR 0027).
         assembler.py             AssistantContextAssembler: composes TurnBriefs.
         tool_runner.py           ToolCallRunner: executes one tool call.
         engine.py                AssistantEngine: the request pipeline.

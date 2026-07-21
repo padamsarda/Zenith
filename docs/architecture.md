@@ -33,6 +33,7 @@ shared resource a subsystem might need:
 - `commands` — a `CommandExecutor` (see `commands.md`)
 - `plugins` — a `PluginRegistry` (see `plugins.md`)
 - `conversations` — a `ConversationStore` (see `assistant.md`)
+- `memory` — a `MemoryStore` (see `memory.md`)
 - `tools` — a `ToolRegistry` (see `assistant.md`)
 - `skills` — a `SkillRegistry` (see `assistant.md`)
 - `assistant_providers` — an `AssistantProviderRegistry` (see `assistant.md`)
@@ -118,6 +119,7 @@ shutdown either way, and `stop()` always runs.
 | `runtime/commands/` | `Command`, `CommandStatus`, `CommandResult`, `CommandContext`, `CommandExecutor`, and concrete command events. See `commands.md`. |
 | `runtime/plugins/` | `Plugin`, `PluginState`, `PluginManifest`, `PluginContext`, `PluginRegistry`, `PluginLoader`, and concrete plugin events. See `plugins.md`. |
 | `runtime/conversation/` | `Message`, `Conversation`, `ConversationState`, the `ConversationStore` ABC, `InMemoryConversationStore`, `SQLiteConversationStore` (ADR 0018), and concrete conversation events. See `assistant.md`. |
+| `runtime/memory/` | `Memory`, the `MemoryStore` ABC, `InMemoryMemoryStore`, `SQLiteMemoryStore` (FTS5), retrieval scoring, temporal resolution, and salience rules (ADR 0027). See `memory.md`. |
 | `runtime/capabilities/` | `Tool`, `Skill`, their registries, the `CapabilityCatalog`, and concrete capability events. See `assistant.md`. |
 | `runtime/providers/` | `AssistantProvider`, `TurnBrief`, `AssistantTurn`, `ToolCall`, `AssistantProviderRegistry`, the built-in `EchoProvider` / `ScriptedProvider`, and `ClaudeProvider` (ADR 0015). See `assistant.md`. |
 | `runtime/tools/` | `FilesystemTool`, `ShellTool`, `GitTool`, `DiffTool`, `TestRunnerTool`, `AppLauncherTool`, `MediaControlTool` (ADR 0024), and the shared `sandbox`/`process`/`arguments` helpers they build on (ADR 0016). See `assistant.md`. |

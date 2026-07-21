@@ -287,7 +287,7 @@ music," "increase volume," "open VS Code"). Neither is auto-registered,
 following the ADR 0016 precedent exactly.
 
 Closing/switching applications and listing what is running shipped in
-item 8 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
+item 9 below (`AppControlTool`, ADR 0026). Still open: Bluetooth and
 display management (named in the product vision, not built — different
 mechanisms again, not a natural extension of either desktop tool), and
 an absolute volume level (needs the Windows Core Audio COM API, which
@@ -314,7 +314,36 @@ interface needs its own. A configurable workspace root (today, always
 `Path.cwd()`) is the natural next knob if daily use shows the current
 working directory isn't the right default.
 
-### 8. App control: list, switch, close — shipped
+### 8. Memory (the other first-class product feature) — shipped
+
+`runtime/memory/` (ADR 0027, `docs/memory.md`). Recall is **automatic**:
+`AssistantContextAssembler` pulls relevant memories into every brief, so
+Zeni already knows things when asked rather than having to look them up
+with a tool call. Retrieval scores recency + importance + relevance —
+the formula Stanford's Generative Agents established and most production
+memory systems still use — with relative time ("yesterday", "last
+month") resolved to absolute windows and stripped from the search
+subject, the detail the LongMemEval work isolates as highest-leverage.
+`MemoryCaptureHook` stores what is worth keeping and skips device
+commands; an explicit "remember this" pins the memory so it never decays
+out of reach.
+
+Relevance is SQLite FTS5/BM25 rather than embeddings — the one knowing
+departure from every system surveyed, forced by the standard-library-only
+convention, and drawn behind a seam so an embedding backend is a new
+`MemoryStore` and nothing else.
+
+Still open, and recorded as deliberate limitations rather than
+oversights: capture is **verbatim, not summarized** (an extraction pass
+costs a provider call per exchange and can invent detail); there is **no
+reconciliation**, so memories accumulate and can contradict each other
+with recency and importance deciding which surfaces (Mem0's
+ADD/UPDATE/DELETE/NOOP step is the model to follow); and there is **no
+pruning, expiry, or review surface** — `MemoryTool.forget` is the only
+correction path. Weights and half-life are constructor arguments, not
+configuration, until daily use shows the defaults are wrong.
+
+### 9. App control: list, switch, close — shipped
 
 `AppControlTool` (`app_control`, `runtime/tools/app_control.py`, ADR
 0026) is `AppLauncherTool`'s complement: `list` (every visible window's

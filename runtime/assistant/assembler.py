@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 
 from runtime.capabilities.catalog import build_catalog
 from runtime.exceptions import RequestValidationError
+from runtime.memory.recall import MemoryRecaller, render_memories
 from runtime.providers.base import TurnBrief
+from shared.utils.time_utils import utc_now
 
 if TYPE_CHECKING:
     from runtime.assistant.request import AssistantRequest
@@ -20,12 +22,27 @@ class AssistantContextAssembler:
 
     The Engineering Manager's context-assembly principle (ADR 0010)
     applied to the assistant: a brief is composed from durable state —
-    the conversation's messages, the current capability catalog, and
-    active skills' instructions — at the moment it is needed, and
-    nothing is cached or stored. Recomposing a brief from the same state
-    yields the same brief, so context can never go stale and survives
-    restarts by construction once conversations are durable.
+    the conversation's messages, the current capability catalog, active
+    skills' instructions, and the memories relevant to what was just
+    asked — at the moment it is needed, and nothing is cached or stored.
+    Recomposing a brief from the same state yields the same brief, so
+    context can never go stale and survives restarts by construction once
+    conversations are durable.
+
+    Memory is recalled here, on every turn, rather than through a tool
+    the model chooses to call: what Zeni already knows should simply be
+    present when it answers, not something it must first think to look up
+    (ADR 0027).
     """
+
+    def __init__(self, recaller: MemoryRecaller | None = None) -> None:
+        """Create an assembler.
+
+        Args:
+            recaller: How memories are recalled into each brief. Defaults
+                to a `MemoryRecaller` with the standard retrieval policy.
+        """
+        self._recaller = recaller or MemoryRecaller()
 
     def assemble(
         self,
@@ -75,9 +92,21 @@ class AssistantContextAssembler:
     def _compose_instructions(
         self, request: AssistantRequest, application_context: ApplicationContext
     ) -> str | None:
-        """Join active skills' instructions into one brief section, or None."""
-        sections = [
+        """Join recalled memories and active skills into one brief section, or None.
+
+        Memories come first: they are context the model reads before
+        deciding anything, where a skill is instruction about how to act.
+        """
+        sections: list[str] = []
+
+        now = utc_now()
+        recalled = self._recaller.recall(request.text, application_context, now=now)
+        remembered = render_memories(recalled, now)
+        if remembered is not None:
+            sections.append(remembered)
+
+        sections.extend(
             f"[Skill: {skill.name}]\n{skill.instructions(request)}"
             for skill in self._active_skills(request, application_context)
-        ]
+        )
         return "\n\n".join(sections) if sections else None
